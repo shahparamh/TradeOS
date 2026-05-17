@@ -51,7 +51,7 @@ async def aggregate_market_context() -> dict:
         macro_news = await asyncio.to_thread(fetch_market_news)
         
         return {
-            **indices,
+            "indices": indices,
             "macro_news": macro_news,
             "timestamp": get_ist_now().isoformat()
         }

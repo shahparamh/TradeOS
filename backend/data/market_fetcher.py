@@ -13,21 +13,24 @@ def fetch_live_price(symbol: str) -> dict:
         current_price = info.last_price
         prev_close = info.previous_close
         
-        change_pct = ((current_price - prev_close) / prev_close) * 100 if prev_close else 0
-        
+        change = round(current_price - prev_close, 2) if prev_close else 0
+        change_pct = round(((current_price - prev_close) / prev_close) * 100, 2) if prev_close else 0
+
         return {
             "symbol": symbol,
             "price": round(current_price, 2),
-            "open": round(info.open, 2),
-            "high": round(info.day_high, 2),
-            "low": round(info.day_low, 2),
-            "volume": int(info.last_volume),
-            "prev_close": round(prev_close, 2),
-            "change_pct": round(change_pct, 2)
+            "open": round(info.open, 2) if info.open else None,
+            "high": round(info.day_high, 2) if info.day_high else None,
+            "low": round(info.day_low, 2) if info.day_low else None,
+            "volume": int(info.last_volume) if info.last_volume else 0,
+            "prev_close": round(prev_close, 2) if prev_close else None,
+            "change": change,
+            "percent_change": change_pct,
+            "change_pct": change_pct,  # keep backward compat
         }
     except Exception as e:
         logger.error(f"Error fetching live price for {symbol}: {str(e)}")
-        return {}
+        return {"symbol": symbol, "price": 0, "change": 0, "percent_change": 0}
 
 def fetch_intraday_candles(symbol: str, interval: str = "5m", period: str = "5d") -> pd.DataFrame:
     try:
@@ -60,21 +63,26 @@ def fetch_index_data() -> dict:
         vix_val = vix.last_price
         vix_status = "low" if vix_val < 15 else "moderate" if vix_val <= 20 else "high"
         
-        return {
-            "nifty50": {
-                "value": round(nifty.last_price, 2),
-                "change_pct": round(n_change, 2),
-                "trend": "bullish" if n_change > 0 else "bearish"
+        return [
+            {
+                "symbol": "Nifty 50",
+                "price": round(nifty.last_price, 2),
+                "change": round(nifty.last_price - nifty.previous_close, 2),
+                "percent_change": round(n_change, 2)
             },
-            "sensex": {
-                "value": round(sensex.last_price, 2),
-                "change_pct": round(s_change, 2)
+            {
+                "symbol": "Sensex",
+                "price": round(sensex.last_price, 2),
+                "change": round(sensex.last_price - sensex.previous_close, 2),
+                "percent_change": round(s_change, 2)
             },
-            "india_vix": {
-                "value": round(vix_val, 2),
-                "status": vix_status
+            {
+                "symbol": "India VIX",
+                "price": round(vix_val, 2),
+                "change": 0, # VIX is often viewed differently
+                "percent_change": 0
             }
-        }
+        ]
     except Exception as e:
         logger.error(f"Error fetching index data: {str(e)}")
         return {}

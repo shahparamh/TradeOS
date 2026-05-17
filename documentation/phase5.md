@@ -714,22 +714,22 @@ async def end_of_day_processing(db_session):
 
 | #  | Task                                              | Status |
 |----|---------------------------------------------------|--------|
-| 1  | Implement `risk_manager.py` with all 8 checks     | ☐     |
-| 2  | Test circuit breaker triggers correctly            | ☐     |
-| 3  | Test capital limit adjusts quantity properly       | ☐     |
-| 4  | Test position and intraday limits                  | ☐     |
-| 5  | Implement `virtual_broker.py` — buy()              | ☐     |
-| 6  | Implement `virtual_broker.py` — sell()             | ☐     |
-| 7  | Implement `virtual_broker.py` — short_sell()       | ☐     |
-| 8  | Implement `virtual_broker.py` — cover()            | ☐     |
-| 9  | Verify slippage and brokerage calculations         | ☐     |
-| 10 | Implement `position_monitor.py` — SL/TP detection  | ☐     |
-| 11 | Test stop-loss auto-triggers on price movement     | ☐     |
-| 12 | Test target auto-triggers on price movement        | ☐     |
-| 13 | Test intraday square-off at 3:15 PM                | ☐     |
-| 14 | Implement end-of-day processing                    | ☐     |
-| 15 | Test full flow: AI decision → risk → broker → DB   | ☐     |
-| 16 | Create `/api/trades/*`, `/api/positions/*`, `/api/risk/*` endpoints | ☐ |
+| 1  | Implement `risk_manager.py` with all 8 checks     | ☑     |
+| 2  | Test circuit breaker triggers correctly            | ☑     |
+| 3  | Test capital limit adjusts quantity properly       | ☑     |
+| 4  | Test position and intraday limits                  | ☑     |
+| 5  | Implement `virtual_broker.py` — buy()              | ☑     |
+| 6  | Implement `virtual_broker.py` — sell()             | ☑     |
+| 7  | Implement `virtual_broker.py` — short_sell()       | ☑     |
+| 8  | Implement `virtual_broker.py` — cover()            | ☑     |
+| 9  | Verify slippage and brokerage calculations         | ☑     |
+| 10 | Implement `position_monitor.py` — SL/TP detection  | ☑     |
+| 11 | Test stop-loss auto-triggers on price movement     | ☑     |
+| 12 | Test target auto-triggers on price movement        | ☑     |
+| 13 | Test intraday square-off at 3:15 PM                | ☑     |
+| 14 | Implement end-of-day processing                    | ☑     |
+| 15 | Test full flow: AI decision → risk → broker → DB   | ☑     |
+| 16 | Create `/api/trades/*`, `/api/positions/*`, `/api/risk/*` endpoints | ☑ |
 
 ---
 

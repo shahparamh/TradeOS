@@ -1,0 +1,107 @@
+/* TradeOS — Global Design System */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root {
+    /* Background layers */
+    --bg-primary: #0a0e17;          /* Deepest background */
+    --bg-secondary: #111827;        /* Card backgrounds */
+    --bg-tertiary: #1a2332;         /* Elevated surfaces */
+    --bg-hover: #1f2b3d;            /* Hover states */
+
+    /* Text */
+    --text-primary: #e2e8f0;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
+
+    /* Trading colors */
+    --green-profit: #22c55e;        /* Profit / Buy / Bullish */
+    --green-glow: rgba(34, 197, 94, 0.15);
+    --red-loss: #ef4444;            /* Loss / Sell / Bearish */
+    --red-glow: rgba(239, 68, 68, 0.15);
+
+    /* Agent brand colors */
+    --color-chatgpt: #10a37f;       /* OpenAI green */
+    --color-gemini: #4285f4;        /* Google blue */
+    --color-claude: #d97706;        /* Anthropic amber */
+    --color-grok: #a855f7;          /* xAI purple */
+    --color-groq: #a855f7;          /* Groq purple (same as grok) */
+
+    /* Accent */
+    --accent-blue: #3b82f6;
+    --accent-cyan: #06b6d4;
+
+    /* Borders */
+    --border-color: #1e293b;
+    --border-glow: rgba(59, 130, 246, 0.3);
+
+    /* Fonts */
+    --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+    --font-sans: 'Inter', -apple-system, sans-serif;
+
+    /* Radius */
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 16px;
+
+    /* Shadows */
+    --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.4);
+    --shadow-glow-green: 0 0 20px rgba(34, 197, 94, 0.2);
+    --shadow-glow-red: 0 0 20px rgba(239, 68, 68, 0.2);
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: var(--font-sans);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    min-height: 100vh;
+    overflow-x: hidden;
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+    width: 8px;
+}
+::-webkit-scrollbar-track {
+    background: var(--bg-primary);
+}
+::-webkit-scrollbar-thumb {
+    background: var(--bg-tertiary);
+    border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: var(--bg-hover);
+}
+
+/* Global Transitions */
+a, button {
+    transition: all 0.2s ease;
+    cursor: pointer;
+}
+
+/* Glassmorphism Classes */
+.card {
+    background: linear-gradient(135deg, rgba(17, 24, 39, 0.8), rgba(26, 35, 50, 0.6));
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+    backdrop-filter: blur(12px);
+    box-shadow: var(--shadow-card);
+    transition: all 0.3s ease;
+}
+
+.card:hover {
+    border-color: var(--border-glow);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+/* Utility Classes */
+.text-profit { color: var(--green-profit); }
+.text-loss { color: var(--red-loss); }
+.mono { font-family: var(--font-mono); }

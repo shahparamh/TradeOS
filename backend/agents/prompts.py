@@ -51,9 +51,7 @@ def build_ai_payload(market_context: dict, opportunity: dict, news: list, agent_
     payload = {
         "timestamp": market_context.get("timestamp", ""),
         "market_overview": {
-            "nifty50": market_context.get("nifty50", {}),
-            "sensex": market_context.get("sensex", {}),
-            "india_vix": market_context.get("india_vix", {}),
+            "indices": market_context.get("indices", []),
         },
         "opportunity": {
             "symbol": opportunity.get("symbol"),

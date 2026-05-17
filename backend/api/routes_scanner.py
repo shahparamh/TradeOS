@@ -56,3 +56,66 @@ async def run_scanner():
         "opportunities_found": len(opportunities),
         "opportunities": opportunities
     }
+
+
+@router.get("/analyze/{symbol}")
+async def analyze_stock_manually(symbol: str):
+    """
+    Performs an instant ad-hoc technical and AI agent analysis on any NSE stock symbol.
+    Fetches live data, processes indicators, and queries all active agents concurrently.
+    Does NOT execute trades in the database to prevent polluting simulation records.
+    """
+    symbol = symbol.upper()
+    if not symbol.endswith(".NS") and "." not in symbol:
+        symbol = f"{symbol}.NS"
+        
+    try:
+        import pandas as pd
+        from data.market_fetcher import fetch_intraday_candles, fetch_live_price
+        from scanner.technical_engine import calculate_all_indicators, generate_indicator_summary
+        from data.data_aggregator import aggregate_market_context
+        from agents.agent_executor import execute_all_agents
+        
+        # 1. Fetch intraday candles
+        candles_df = fetch_intraday_candles(symbol, "5m", "1d")
+        if candles_df.empty:
+            return {"status": "error", "message": f"Could not fetch candle data for {symbol}."}
+            
+        # 2. Fetch live price
+        price_res = fetch_live_price(symbol)
+        current_price = price_res.get("price", candles_df["Close"].iloc[-1])
+        
+        # 3. Calculate technical indicators
+        enriched_df = calculate_all_indicators(candles_df)
+        indicators = generate_indicator_summary(enriched_df, symbol)
+        indicators["price"] = current_price
+        
+        # 4. Fetch Market Context (Index performance etc.)
+        market_context = await aggregate_market_context()
+        
+        # 5. Build manual check payload
+        opportunity = {
+            "symbol": symbol,
+            "signal_type": "MANUAL_CHECK",
+            "indicators": indicators
+        }
+        
+        # 6. Execute all active agents concurrently (execute_trades=False is critical!)
+        ai_decisions = await execute_all_agents(
+            market_context=market_context,
+            opportunity=opportunity,
+            news=[],
+            execute_trades=False
+        )
+        
+        return {
+            "status": "success",
+            "symbol": symbol,
+            "price": current_price,
+            "technical_summary": indicators,
+            "ai_decisions": ai_decisions
+        }
+        
+    except Exception as e:
+        return {"status": "error", "message": f"Analysis failed: {str(e)}"}
+

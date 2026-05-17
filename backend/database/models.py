@@ -53,6 +53,7 @@ class Position(Base):
     agent_id = Column(Integer, ForeignKey("agents.id"))
     trade_id = Column(Integer, ForeignKey("trades.id"))
     symbol = Column(String(30))
+    trade_type = Column(String(20))
     position_type = Column(String(10))
     quantity = Column(Integer)
     entry_price = Column(Float)

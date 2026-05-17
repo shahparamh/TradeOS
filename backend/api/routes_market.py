@@ -23,9 +23,11 @@ def get_candles(symbol: str, interval: str = "5m", period: str = "5d"):
     
     candles = []
     df_reset = df.reset_index()
+    date_col = "Datetime" if "Datetime" in df_reset.columns else "Date"
+    
     for _, row in df_reset.iterrows():
         candles.append({
-            "datetime": str(row["Datetime"]),
+            "datetime": str(row[date_col]),
             "open": round(row["Open"], 2),
             "high": round(row["High"], 2),
             "low": round(row["Low"], 2),
