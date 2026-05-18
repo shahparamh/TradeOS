@@ -24,4 +24,4 @@ MARKET_OPEN = "09:15"
 MARKET_CLOSE = "15:30"
 
 # AI Agent names
-AGENT_NAMES = ["Gemini", "Groq-Llama"]
+AGENT_NAMES = ["Gemini", "Groq-Llama", "Local-Ollama", "OpenRouter"]

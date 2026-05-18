@@ -9,28 +9,22 @@ def seed_agents():
         Base.metadata.create_all(bind=engine)
 
         # Delete old agents and re-seed with correct providers
-        existing = db.query(Agent).all()
+        existing_agents = {a.name: a for a in db.query(Agent).all()}
         
-        # If old agents exist with wrong providers, reset
-        needs_reseed = False
-        if existing:
-            for a in existing:
-                if a.name == "Grok" and a.provider == "xai":
-                    needs_reseed = True
-                    break
-        
-        if needs_reseed or db.query(Agent).count() == 0:
-            # Clear old agents
-            db.query(Agent).delete()
-            db.commit()
+        agents_to_add = []
+        if "Gemini" not in existing_agents:
+            agents_to_add.append(Agent(name="Gemini", provider="google", model_name=settings.GEMINI_MODEL, cash_balance=settings.INITIAL_CAPITAL))
+        if "Groq-Llama" not in existing_agents:
+            agents_to_add.append(Agent(name="Groq-Llama", provider="groq", model_name=settings.GROQ_MODEL, cash_balance=settings.INITIAL_CAPITAL))
+        if "Local-Ollama" not in existing_agents:
+            agents_to_add.append(Agent(name="Local-Ollama", provider="ollama", model_name=settings.OLLAMA_MODEL, cash_balance=settings.INITIAL_CAPITAL))
+        if "OpenRouter" not in existing_agents:
+            agents_to_add.append(Agent(name="OpenRouter", provider="openrouter", model_name="openrouter/free", cash_balance=settings.INITIAL_CAPITAL))
             
-            agents = [
-                Agent(name="Gemini", provider="google", model_name=settings.GEMINI_MODEL, cash_balance=settings.INITIAL_CAPITAL),
-                Agent(name="Groq-Llama", provider="groq", model_name=settings.GROQ_MODEL, cash_balance=settings.INITIAL_CAPITAL),
-            ]
-            db.add_all(agents)
+        if agents_to_add:
+            db.add_all(agents_to_add)
             db.commit()
-            print("Successfully seeded 2 AI agents: Gemini + Groq-Llama")
+            print(f"Successfully added {len(agents_to_add)} new AI agents.")
         else:
             print("Agents already seeded correctly.")
     except Exception as e:
