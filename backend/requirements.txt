@@ -13,9 +13,6 @@ yfinance
 pandas
 numpy
 
-# === Technical Indicators ===
-pandas-ta
-
 # === News & Scraping ===
 requests==2.32.3
 beautifulsoup4==4.12.3

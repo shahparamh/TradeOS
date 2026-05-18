@@ -1,5 +1,4 @@
 import pandas as pd
-import pandas_ta as ta
 import numpy as np
 
 def calculate_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
@@ -10,26 +9,36 @@ def calculate_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
     # --- Momentum Indicators ---
-    df["rsi"] = ta.rsi(df["Close"], length=14)
+    # Native High-Performance RSI (Wilder's EMA method exactly matching standard charts)
+    delta = df["Close"].diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.ewm(com=13, adjust=False).mean()
+    avg_loss = loss.ewm(com=13, adjust=False).mean()
+    rs = avg_gain / avg_loss.replace(0, np.nan) # Avoid division by zero
+    df["rsi"] = 100 - (100 / (1 + rs))
+    df["rsi"] = df["rsi"].fillna(50)
 
-    # --- Trend Indicators ---
-    macd = ta.macd(df["Close"], fast=12, slow=26, signal=9)
-    if macd is not None:
-        df["macd"] = macd.iloc[:, 0]
-        df["macd_signal"] = macd.iloc[:, 1]
-        df["macd_histogram"] = macd.iloc[:, 2]
+    # --- Trend Indicators (MACD) ---
+    # Native High-Performance MACD (12, 26, 9)
+    ema_fast = df["Close"].ewm(span=12, adjust=False).mean()
+    ema_slow = df["Close"].ewm(span=26, adjust=False).mean()
+    df["macd"] = ema_fast - ema_slow
+    df["macd_signal"] = df["macd"].ewm(span=9, adjust=False).mean()
+    df["macd_histogram"] = df["macd"] - df["macd_signal"]
 
-    df["ema_20"] = ta.ema(df["Close"], length=20)
-    df["ema_50"] = ta.ema(df["Close"], length=50)
+    # Native High-Performance EMA
+    df["ema_20"] = df["Close"].ewm(span=20, adjust=False).mean()
+    df["ema_50"] = df["Close"].ewm(span=50, adjust=False).mean()
 
     # --- Volume Indicators ---
-    # VWAP usually requires a DatetimeIndex
-    try:
-        df["vwap"] = ta.vwap(df["High"], df["Low"], df["Close"], df["Volume"])
-    except:
-        df["vwap"] = df["Close"] # Fallback
+    # Native High-Performance VWAP
+    # VWAP = Sum(Volume * Typical Price) / Sum(Volume)
+    typical_price = (df["High"] + df["Low"] + df["Close"]) / 3
+    df["vwap"] = (typical_price * df["Volume"]).cumsum() / df["Volume"].cumsum().replace(0, np.nan)
+    df["vwap"] = df["vwap"].fillna(df["Close"])
 
-    df["volume_sma_20"] = ta.sma(df["Volume"], length=20)
+    df["volume_sma_20"] = df["Volume"].rolling(window=20).mean()
     
     # Avoid division by zero
     df["volume_ratio"] = np.where(
@@ -38,14 +47,21 @@ def calculate_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
         1.0
     )
 
-    # --- Volatility Indicators ---
-    bbands = ta.bbands(df["Close"], length=20, std=2)
-    if bbands is not None:
-        df["bb_lower"] = bbands.iloc[:, 0]
-        df["bb_middle"] = bbands.iloc[:, 1]
-        df["bb_upper"] = bbands.iloc[:, 2]
+    # --- Volatility Indicators (Bollinger Bands) ---
+    # Native High-Performance Bollinger Bands (20, 2)
+    std = df["Close"].rolling(window=20).std()
+    df["bb_middle"] = df["Close"].rolling(window=20).mean()
+    df["bb_upper"] = df["bb_middle"] + (std * 2)
+    df["bb_lower"] = df["bb_middle"] - (std * 2)
 
-    df["atr"] = ta.atr(df["High"], df["Low"], df["Close"], length=14)
+    # Native High-Performance ATR (14)
+    high_low = df['High'] - df['Low']
+    high_close = (df['High'] - df['Close'].shift()).abs()
+    low_close = (df['Low'] - df['Close'].shift()).abs()
+    ranges = pd.concat([high_low, high_close, low_close], axis=1)
+    true_range = ranges.max(axis=1)
+    df['atr'] = true_range.ewm(alpha=1/14, adjust=False).mean()
+    df['atr'] = df['atr'].fillna(df["Close"] * 0.01)
 
     # --- Support & Resistance (Pivot Points) ---
     df["pivot"] = (df["High"].shift(1) + df["Low"].shift(1) + df["Close"].shift(1)) / 3
