@@ -43,12 +43,8 @@ def get_all_positions(db: Session = Depends(get_db)):
     result = []
     for pos in positions:
         agent = db.query(Agent).get(pos.agent_id)
-        # Try to get live price to update unrealized PnL
-        try:
-            price_data = fetch_live_price(pos.symbol)
-            current_price = price_data.get("price", pos.current_price)
-        except Exception:
-            current_price = pos.current_price
+        # Load the last known price directly from the database to prevent Yahoo Finance timeout!
+        current_price = pos.current_price
 
         unrealized = 0.0
         if pos.position_type == "LONG":
