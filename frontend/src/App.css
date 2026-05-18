@@ -397,3 +397,220 @@
     color: var(--red-loss);
     background: rgba(239, 68, 68, 0.1);
 }
+
+/* Pre-Market Strategy Panel */
+.premarket-intel-card {
+    background: rgba(30, 41, 59, 0.25);
+    border: 1px solid rgba(99, 102, 241, 0.1);
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(10px);
+    border-radius: 16px;
+    padding: 20px;
+    position: relative;
+    overflow: hidden;
+}
+
+.premarket-intel-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 3px;
+    background: linear-gradient(90deg, #6366f1, #a855f7, #10b981);
+}
+
+.pm-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    gap: 12px;
+}
+
+.pm-title-wrap h3 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.pm-subtitle {
+    margin: 4px 0 0 0;
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.pm-pulse-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.pm-pulse {
+    width: 8px;
+    height: 8px;
+    background: #6366f1;
+    border-radius: 50%;
+    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.7);
+    animation: pm-pulse-anim 2s infinite;
+}
+
+@keyframes pm-pulse-anim {
+    0% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.7);
+    }
+    70% {
+        transform: scale(1);
+        box-shadow: 0 0 0 8px rgba(99, 102, 241, 0);
+    }
+    100% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 rgba(99, 102, 241, 0);
+    }
+}
+
+.pm-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 30px;
+    gap: 12px;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.pm-strategies-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.pm-strategy-item {
+    background: rgba(15, 23, 42, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.02);
+    border-radius: 10px;
+    overflow: hidden;
+    transition: all 0.2s ease;
+}
+
+.pm-strategy-item:hover {
+    border-color: rgba(99, 102, 241, 0.15);
+    background: rgba(15, 23, 42, 0.35);
+}
+
+.pm-item-summary {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    cursor: pointer;
+}
+
+.pm-item-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.pm-agent-badge {
+    font-size: 10px;
+    font-weight: 800;
+    color: #a855f7;
+    background: rgba(168, 85, 247, 0.1);
+    padding: 3px 8px;
+    border-radius: 6px;
+    text-transform: uppercase;
+}
+
+.pm-symbol {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.pm-item-right {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+
+.pm-boundaries {
+    display: flex;
+    gap: 16px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.pm-toggle-icon {
+    font-size: 10px;
+    color: var(--text-secondary);
+}
+
+.pm-item-details {
+    padding: 14px 16px;
+    background: rgba(15, 23, 42, 0.3);
+    border-top: 1px solid rgba(255, 255, 255, 0.02);
+}
+
+.pm-item-details h4 {
+    margin: 0 0 8px 0;
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+}
+
+.pm-reasoning {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text-primary);
+    white-space: pre-line;
+}
+
+.pm-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    text-align: center;
+    gap: 8px;
+    color: var(--text-secondary);
+}
+
+.pm-empty-state span {
+    font-size: 13px;
+}
+
+.pm-empty-state p {
+    margin: 0;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.4);
+}
+
+/* Glowing Daily Bias Badges */
+.bias-bullish {
+    background: rgba(16, 185, 129, 0.08) !important;
+    color: #10b981 !important;
+    border: 1px solid rgba(16, 185, 129, 0.15) !important;
+    font-weight: 700;
+}
+
+.bias-bearish {
+    background: rgba(239, 68, 68, 0.08) !important;
+    color: #ef4444 !important;
+    border: 1px solid rgba(239, 68, 68, 0.15) !important;
+    font-weight: 700;
+}
+
+.bias-neutral {
+    background: rgba(59, 130, 246, 0.08) !important;
+    color: #3b82f6 !important;
+    border: 1px solid rgba(59, 130, 246, 0.15) !important;
+    font-weight: 700;
+}

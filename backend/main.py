@@ -130,6 +130,39 @@ async def trigger_pre_market_manually():
     asyncio.create_task(trading_scheduler.run_pre_market_session())
     return {"status": "triggered", "message": "Pre-market strategy planning started in background"}
 
+@app.get("/api/scheduler/pre-market/today")
+def get_today_pre_market_strategy():
+    from database.connection import SessionLocal
+    from database.models import AgentDailyStrategy
+    from datetime import date
+    
+    db = SessionLocal()
+    try:
+        today = date.today()
+        # Query strategies for today
+        strategies = db.query(AgentDailyStrategy).filter(AgentDailyStrategy.date == today).all()
+        
+        result = []
+        for s in strategies:
+            agent_name = s.agent.name if s.agent else f"Agent #{s.agent_id}"
+            result.append({
+                "id": s.id,
+                "agent_id": s.agent_id,
+                "agent_name": agent_name,
+                "date": str(s.date),
+                "symbol": s.symbol,
+                "daily_bias": s.daily_bias,
+                "entry_lower_limit": s.entry_lower_limit,
+                "entry_upper_limit": s.entry_upper_limit,
+                "target_price": s.target_price,
+                "stop_loss": s.stop_loss,
+                "reasoning": s.reasoning,
+                "created_at": str(s.created_at)
+            })
+        return result
+    finally:
+        db.close()
+
 # Include routers
 app.include_router(market_router, prefix="/api")
 app.include_router(scanner_router, prefix="/api")

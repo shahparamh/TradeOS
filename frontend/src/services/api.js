@@ -64,4 +64,9 @@ export const performanceAPI = {
     getDaily: () => api.get('/broker/performance/daily'),
 };
 
+export const strategyAPI = {
+    getTodayPreMarket: () => api.get('/scheduler/pre-market/today'),
+    triggerPreMarket: () => api.post('/scheduler/pre-market'),
+};
+
 export default api;

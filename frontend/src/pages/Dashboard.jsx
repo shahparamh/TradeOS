@@ -10,7 +10,7 @@ import {
     Zap,
     Briefcase
 } from 'lucide-react';
-import { brokerAPI, marketAPI, performanceAPI } from '../services/api';
+import { brokerAPI, marketAPI, performanceAPI, strategyAPI } from '../services/api';
 
 const StatCard = ({ title, value, subValue, icon, trend, color }) => (
     <div className="card stat-card" style={{ borderLeft: `4px solid ${color || 'var(--border-color)'}` }}>
@@ -34,6 +34,43 @@ const Dashboard = () => {
     const [trades, setTrades] = useState([]);
     const [leaderboard, setLeaderboard] = useState([]);
     const [loading, setLoading] = useState(true);
+    
+    // AI Pre-Market Strategy states
+    const [strategies, setStrategies] = useState([]);
+    const [loadingStrategy, setLoadingStrategy] = useState(true);
+    const [expandedStrategyId, setExpandedStrategyId] = useState(null);
+
+    const fetchStrategies = async () => {
+        try {
+            const res = await strategyAPI.getTodayPreMarket();
+            setStrategies(res.data);
+        } catch (err) {
+            console.error("Failed to load pre-market strategy", err);
+        } finally {
+            setLoadingStrategy(false);
+        }
+    };
+
+    const handleTriggerPreMarket = async () => {
+        try {
+            setLoadingStrategy(true);
+            await strategyAPI.triggerPreMarket();
+            // Wait 2.5 seconds for the background task to initialize and refresh
+            setTimeout(async () => {
+                try {
+                    const res = await strategyAPI.getTodayPreMarket();
+                    setStrategies(res.data);
+                } catch (e) {
+                    console.error("Error refreshing pre-market strategy", e);
+                } finally {
+                    setLoadingStrategy(false);
+                }
+            }, 2500);
+        } catch (err) {
+            console.error("Failed to trigger pre-market planner", err);
+            setLoadingStrategy(false);
+        }
+    };
 
     useEffect(() => {
         const fetchData = async () => {
@@ -58,7 +95,11 @@ const Dashboard = () => {
             }
         };
         fetchData();
-        const interval = setInterval(fetchData, 10000);
+        fetchStrategies();
+        const interval = setInterval(() => {
+            fetchData();
+            fetchStrategies();
+        }, 10000);
         return () => clearInterval(interval);
     }, []);
 
@@ -96,6 +137,73 @@ const Dashboard = () => {
                         </span>
                     </div>
                 ))}
+            </div>
+
+            {/* AI Pre-Market Strategy Panel */}
+            <div className="card premarket-intel-card animate-fade-in" style={{ marginBottom: '24px' }}>
+                <div className="pm-card-header">
+                    <div className="pm-title-wrap">
+                        <div className="pm-pulse-wrap">
+                            <span className="pm-pulse"></span>
+                            <h3>AI Pre-Market Strategy Intel</h3>
+                        </div>
+                        <p className="pm-subtitle">Daily stock selection, boundaries, and logic issued at 9:00 AM IST</p>
+                    </div>
+                    <button 
+                        className="btn-primary trigger-pm-btn" 
+                        onClick={handleTriggerPreMarket}
+                        disabled={loadingStrategy}
+                        style={{ padding: '6px 12px', fontSize: '11px', gap: '6px', background: 'rgba(99, 102, 241, 0.2)', border: '1px solid rgba(99, 102, 241, 0.4)', borderRadius: '6px', cursor: 'pointer', color: '#fff' }}
+                    >
+                        ⚡ Run Planner Now
+                    </button>
+                </div>
+
+                {loadingStrategy ? (
+                    <div className="pm-loading">
+                        <div className="pulse-dot green" style={{ width: '12px', height: '12px', margin: '0 auto 10px auto' }}></div>
+                        <span>Parsing daily macro signals and strategizing...</span>
+                    </div>
+                ) : strategies.length > 0 ? (
+                    <div className="pm-strategies-list">
+                        {strategies.map(s => {
+                            const isExpanded = expandedStrategyId === s.id;
+                            const biasClass = s.daily_bias === 'BULLISH' ? 'bias-bullish' : s.daily_bias === 'BEARISH' ? 'bias-bearish' : 'bias-neutral';
+                            return (
+                                <div key={s.id} className="pm-strategy-item">
+                                    <div className="pm-item-summary" onClick={() => setExpandedStrategyId(isExpanded ? null : s.id)}>
+                                        <div className="pm-item-left">
+                                            <span className="pm-agent-badge">{s.agent_name}</span>
+                                            <span className="pm-symbol">{s.symbol}</span>
+                                            <span className={`badge ${biasClass}`} style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px' }}>{s.daily_bias}</span>
+                                        </div>
+                                        <div className="pm-item-right">
+                                            <div className="pm-boundaries">
+                                                <span>Range: <strong className="font-mono" style={{ color: 'var(--text-primary)' }}>₹{s.entry_lower_limit} - ₹{s.entry_upper_limit}</strong></span>
+                                                <span>Target: <strong className="font-mono text-profit">₹{s.target_price}</strong></span>
+                                                <span>SL: <strong className="font-mono text-loss">₹{s.stop_loss}</strong></span>
+                                            </div>
+                                            <span className="pm-toggle-icon">
+                                                {isExpanded ? '▲' : '▼'}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    {isExpanded && (
+                                        <div className="pm-item-details animate-slide-down">
+                                            <h4>AI Executive Logic:</h4>
+                                            <p className="pm-reasoning">{s.reasoning}</p>
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                ) : (
+                    <div className="pm-empty-state">
+                        <span>🕒 Pre-Market Strategy session has not run today yet. Current bias is set to <strong>NEUTRAL</strong>.</span>
+                        <p>You can run it manually above, or the TradeOS Scheduler will automatically trigger it at 9:00 AM IST.</p>
+                    </div>
+                )}
             </div>
 
             <div className="stats-grid">
