@@ -72,6 +72,23 @@ class TradingScheduler:
             logger.warning("Cycle already in progress, skipping...")
             return
             
+        from datetime import datetime, timezone, timedelta
+        ist = timezone(timedelta(hours=5, minutes=30))
+        now = datetime.now(ist)
+        
+        # 1. Market Days Check (0=Mon, 4=Fri)
+        if now.weekday() > 4:
+            logger.info("Market is closed (Weekend). Skipping trading cycle to save API keys.")
+            return
+            
+        # 2. Market Hours Check (9:15 AM to 3:15 PM)
+        market_start = now.replace(hour=9, minute=15, second=0, microsecond=0)
+        market_end = now.replace(hour=15, minute=15, second=0, microsecond=0)
+        
+        if now < market_start or now > market_end:
+            logger.info(f"Market is closed (Time: {now.strftime('%I:%M %p')}). Skipping trading cycle to save API keys.")
+            return
+            
         self.is_running_cycle = True
         db = SessionLocal()
         logger.info("=== TRADING CYCLE START ===")
