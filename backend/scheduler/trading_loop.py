@@ -6,7 +6,7 @@ from agents.agent_executor import execute_all_agents
 from data.data_aggregator import aggregate_market_context
 from data.market_fetcher import fetch_intraday_candles
 from scanner.technical_engine import calculate_all_indicators, generate_indicator_summary
-from scheduler.monitor import PositionMonitor
+from broker.position_monitor import PositionMonitor
 from utils.logger import setup_logger
 from utils.constants import WATCHLIST
 from datetime import datetime, date
