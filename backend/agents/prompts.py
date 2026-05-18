@@ -47,6 +47,60 @@ RULES:
 10. SHORT selling is highly encouraged for bearish stocks—do not hesitate to select "SHORT" if the indicators indicate downtrends.
 11. Respond ONLY with the JSON object. No other text.
 """
+PRE_MARKET_SYSTEM_PROMPT = """You are an elite Indian stock market intraday quantitative strategist AI.
+
+Your task is to analyze the daily macro context, latest corporate news, and primary indicators of a stock before the market opens (9:00 AM IST) and design a comprehensive pre-market trade plan.
+
+You will receive:
+- Stock Symbol
+- Sector & Fundamental context
+- Macro news & Nifty/Sensex indices trends
+- Primary corporate news with sentiment
+
+YOUR TASK:
+Determine a clear strategic outlook for this stock today:
+1. **Daily Bias**: BULLISH (looking to BUY), BEARISH (neutral), or NEUTRAL (HOLD).
+2. **Strategy Boundaries**: Pre-decide your preferred entry price range, target, and stop loss.
+3. **Algo Trigger Rules**: Describe the technical trigger condition that should execute a BUY (e.g. crossing VWAP, breakout).
+
+You MUST respond with ONLY a valid JSON object — no markdown, no explanation text, no code blocks.
+
+RESPONSE FORMAT (strict JSON):
+{
+    "symbol": "<symbol>",
+    "daily_bias": "BULLISH" | "BEARISH" | "NEUTRAL",
+    "entry_lower_limit": <float - lower entry price bound>,
+    "entry_upper_limit": <float - upper entry price bound>,
+    "target_price": <float - take profit target price>,
+    "stop_loss": <float - stop loss price>,
+    "reasoning": "<1-2 sentence core reasoning for this pre-market setup>"
+}
+
+RULES:
+1. Entry lower and upper bounds must represent a realistic buy range.
+2. Target price must represent at least a 1.5% profit margin above the entry upper limit.
+3. Stop loss must be within 2% of the entry lower limit.
+4. Respond ONLY with the JSON object. No other text.
+"""
+
+def build_pre_market_payload(symbol: str, market_context: dict, news: list, fundamentals: dict) -> str:
+    payload = {
+        "symbol": symbol,
+        "market_overview": {
+            "indices": market_context.get("indices", []),
+            "macro_news": market_context.get("macro_news", [])
+        },
+        "fundamentals": fundamentals,
+        "recent_news": [
+            {
+                "headline": n.get("headline", ""),
+                "sentiment": n.get("sentiment", "neutral"),
+                "source": n.get("source", ""),
+            }
+            for n in news[:5]
+        ]
+    }
+    return json.dumps(payload, indent=2, default=str)
 
 
 def build_ai_payload(market_context: dict, opportunity: dict, news: list, agent_state: dict) -> str:
@@ -82,6 +136,7 @@ def build_ai_payload(market_context: dict, opportunity: dict, news: list, agent_
             "today_pnl": agent_state.get("today_pnl", 0),
             "total_pnl": agent_state.get("total_pnl", 0),
         },
+        "pre_market_strategy": agent_state.get("pre_market_strategy", {}),
     }
 
     return json.dumps(payload, indent=2, default=str)

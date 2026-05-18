@@ -14,7 +14,7 @@ logger = setup_logger("agent_gemini")
 # Keep track of the active working key index at the module level
 _current_key_index = 0
 
-async def query_gemini(payload: str) -> dict:
+async def query_gemini(payload: str, system_prompt: str = SYSTEM_PROMPT) -> dict:
     """
     Sends market data payload to Gemini and returns a parsed trading decision.
     Uses stateful API key rotation to bypass rate limits gracefully.
@@ -38,7 +38,7 @@ async def query_gemini(payload: str) -> dict:
             
             model = genai.GenerativeModel(
                 model_name=settings.GEMINI_MODEL,
-                system_instruction=SYSTEM_PROMPT,
+                system_instruction=system_prompt,
             )
 
             response = model.generate_content(

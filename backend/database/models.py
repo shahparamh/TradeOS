@@ -132,3 +132,43 @@ class AIResponse(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     agent = relationship("Agent", back_populates="ai_responses")
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(50), unique=True, index=True, nullable=False)
+    hashed_password = Column(String(200), nullable=False)
+    email = Column(String(100), unique=True, index=True, nullable=False)
+    role = Column(String(20), default="trader") # 'admin', 'trader'
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class AgentDailyStrategy(Base):
+    __tablename__ = "agent_daily_strategies"
+
+    id = Column(Integer, primary_key=True, index=True)
+    agent_id = Column(Integer, ForeignKey("agents.id"))
+    date = Column(Date, default=datetime.utcnow().date())
+    symbol = Column(String(30))
+    daily_bias = Column(String(20)) # BULLISH, BEARISH, NEUTRAL
+    entry_lower_limit = Column(Float)
+    entry_upper_limit = Column(Float)
+    target_price = Column(Float)
+    stop_loss = Column(Float)
+    reasoning = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    agent = relationship("Agent")
+
+class SystemRule(Base):
+    __tablename__ = "system_rules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String(50), unique=True, index=True, nullable=False) # e.g. 'enable_loss_lockout'
+    value_type = Column(String(10), default="boolean") # 'boolean', 'float', 'int'
+    bool_value = Column(Boolean, nullable=True)
+    numeric_value = Column(Float, nullable=True)
+    description = Column(String(250))
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+

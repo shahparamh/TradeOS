@@ -46,6 +46,25 @@ async def execute_all_agents(
 
         agent_states = {}
         for agent in agents:
+            from database.models import AgentDailyStrategy
+            from datetime import date
+            strategy = db.query(AgentDailyStrategy).filter(
+                AgentDailyStrategy.agent_id == agent.id,
+                AgentDailyStrategy.symbol == opportunity.get("symbol"),
+                AgentDailyStrategy.date == date.today()
+            ).first()
+            
+            pre_market_data = {}
+            if strategy:
+                pre_market_data = {
+                    "daily_bias": strategy.daily_bias,
+                    "entry_lower_limit": strategy.entry_lower_limit,
+                    "entry_upper_limit": strategy.entry_upper_limit,
+                    "target_price": strategy.target_price,
+                    "stop_loss": strategy.stop_loss,
+                    "reasoning": strategy.reasoning
+                }
+
             agent_states[agent.name] = {
                 "agent_name": agent.name,
                 "cash_balance": agent.cash_balance,
@@ -57,7 +76,8 @@ async def execute_all_agents(
                 ]),
                 "today_pnl": 0.0, # Simplified for now
                 "total_pnl": agent.total_pnl,
-                "open_symbols": [p.symbol for p in agent.positions]
+                "open_symbols": [p.symbol for p in agent.positions],
+                "pre_market_strategy": pre_market_data
             }
 
         tasks = []

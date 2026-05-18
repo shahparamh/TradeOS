@@ -14,7 +14,7 @@ logger = setup_logger("agent_ollama")
 
 OLLAMA_API_URL = "http://localhost:11434/api/chat"
 
-async def query_ollama(payload: str) -> dict:
+async def query_ollama(payload: str, system_prompt: str = SYSTEM_PROMPT) -> dict:
     """
     Sends market data payload to local Ollama and returns parsed trading decision.
     """
@@ -23,7 +23,7 @@ async def query_ollama(payload: str) -> dict:
     body = {
         "model": settings.OLLAMA_MODEL,
         "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": payload},
         ],
         "stream": False,

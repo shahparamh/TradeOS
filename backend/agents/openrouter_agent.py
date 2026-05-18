@@ -2,10 +2,11 @@ import httpx
 import json
 from config import settings
 from utils.logger import setup_logger
+from agents.prompts import SYSTEM_PROMPT
 
 logger = setup_logger("openrouter_agent")
 
-async def query_openrouter_free(payload: dict) -> dict:
+async def query_openrouter_free(payload: dict, system_prompt: str = None) -> dict:
     """
     Queries 100% free models on OpenRouter (e.g. Qwen 2.5 72B) 
     with highly generous rate limits.
@@ -20,16 +21,13 @@ async def query_openrouter_free(payload: dict) -> dict:
     }
     
     # We use openrouter/free - OpenRouter's auto-router that always selects an active free model!
+    sys_content = system_prompt if system_prompt else f"You are a professional NSE stock trader. You must return response in valid JSON format only. Reference rules:\n{SYSTEM_PROMPT}"
     data = {
         "model": "openrouter/free",
-
-
-
-
         "messages": [
             {
                 "role": "system",
-                "content": "You are a professional NSE stock trader. You must return response in valid JSON format only."
+                "content": sys_content
             },
             {
                 "role": "user",

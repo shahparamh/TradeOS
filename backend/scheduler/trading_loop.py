@@ -21,7 +21,16 @@ class TradingScheduler:
 
     def start(self):
         """Starts the scheduler and registers jobs."""
-        # 1. Main Trading Loop - Every 10 mins (9:15 AM - 3:30 PM IST)
+        # 1. Pre-Market Strategy Planner - At 9:00 AM IST
+        self.scheduler.add_job(
+            self.run_pre_market_session,
+            CronTrigger(day_of_week="mon-fri", hour=9, minute=0, timezone="Asia/Kolkata"),
+            id="pre_market_strategy",
+            name="Pre-Market Strategy Planner",
+            replace_existing=True
+        )
+
+        # 2. Main Trading Loop - Every 10 mins (9:15 AM - 3:30 PM IST)
         self.scheduler.add_job(
             self.run_trading_cycle,
             CronTrigger(day_of_week="mon-fri", hour="9-15", minute="*/10", timezone="Asia/Kolkata"),
@@ -30,7 +39,7 @@ class TradingScheduler:
             replace_existing=True
         )
 
-        # 2. Position Monitor - Every 2 mins
+        # 3. Position Monitor - Every 2 mins
         self.scheduler.add_job(
             self.run_monitor_cycle,
             "interval",
@@ -40,7 +49,7 @@ class TradingScheduler:
             replace_existing=True
         )
 
-        # 3. End of Day - 3:45 PM IST
+        # 4. End of Day - 3:45 PM IST
         self.scheduler.add_job(
             self.run_end_of_day,
             CronTrigger(day_of_week="mon-fri", hour=15, minute=45, timezone="Asia/Kolkata"),
@@ -130,8 +139,21 @@ class TradingScheduler:
                     "indicators": indicators
                 }
                 
+                # Dynamic news fetch if enabled in system rules
+                from database.models import SystemRule
+                enable_news = db.query(SystemRule).filter(SystemRule.key == "enable_news_sentiment").first()
+                enable_news_bool = enable_news.bool_value if enable_news else True
+                
+                news_payload = []
+                if enable_news_bool:
+                    try:
+                        from data.news_fetcher import fetch_all_news_for_stock
+                        news_payload = fetch_all_news_for_stock(symbol) or []
+                    except Exception as e:
+                        logger.error(f"Failed to fetch news for {symbol}: {e}")
+                
                 # Logic inside execute_all_agents handles calling AIs and executing trades via VirtualBroker
-                await execute_all_agents(market_context, opportunity, [])
+                await execute_all_agents(market_context, opportunity, news_payload)
                 
                 # Small sleep to be kind to APIs
                 await asyncio.sleep(10)
@@ -188,3 +210,105 @@ class TradingScheduler:
             db.rollback()
         finally:
             db.close()
+
+    async def run_pre_market_session(self):
+        """Pre-market planner job: Decides bias, limits, targets, and stops before open (9:00 AM IST)."""
+        db = SessionLocal()
+        logger.info("=== PRE-MARKET STRATEGY SESSION START ===")
+        try:
+            # 1. Market Context
+            market_context = await aggregate_market_context()
+            
+            # 2. Active Agents
+            agents = db.query(Agent).filter(Agent.is_active == True).all()
+            if not agents:
+                logger.info("No active agents found for pre-market planning.")
+                return
+                
+            # 3. Watchlist
+            symbols = WATCHLIST
+            
+            from agents.prompts import PRE_MARKET_SYSTEM_PROMPT, build_pre_market_payload
+            from data.news_fetcher import fetch_all_news_for_stock
+            from database.models import AgentDailyStrategy
+            from datetime import date
+            
+            # Importing agent clients dynamically to avoid circular references
+            from agents.gemini_agent import query_gemini
+            from agents.groq_agent import query_groq
+            from agents.openrouter_agent import query_openrouter_free
+            from agents.deepseek_agent import query_deepseek
+            from agents.ollama_agent import query_ollama
+            
+            for symbol in symbols:
+                # Fetch recent news to pass into LLM context
+                news = []
+                try:
+                    news = fetch_all_news_for_stock(symbol)
+                except Exception as ne:
+                    logger.warning(f"Failed to fetch news for {symbol}: {ne}")
+                    
+                fundamentals = {"symbol": symbol, "desc": "NSE Watchlist Stock"}
+                payload_str = build_pre_market_payload(symbol, market_context, news, fundamentals)
+                
+                for agent in agents:
+                    # Skip if strategy already generated for today
+                    existing = db.query(AgentDailyStrategy).filter(
+                        AgentDailyStrategy.agent_id == agent.id,
+                        AgentDailyStrategy.symbol == symbol,
+                        AgentDailyStrategy.date == date.today()
+                    ).first()
+                    
+                    if existing:
+                        logger.info(f"Strategy already exists for {agent.name} on {symbol} today.")
+                        continue
+                        
+                    decision_data = None
+                    try:
+                        if agent.provider == "google":
+                            decision_data = await query_gemini(payload_str, system_prompt=PRE_MARKET_SYSTEM_PROMPT)
+                        elif agent.provider == "groq":
+                            decision_data = await query_groq(payload_str, system_prompt=PRE_MARKET_SYSTEM_PROMPT)
+                        elif agent.provider == "openrouter":
+                            import json
+                            payload_dict = json.loads(payload_str)
+                            decision_data = await query_openrouter_free(payload_dict, system_prompt=PRE_MARKET_SYSTEM_PROMPT)
+                        elif agent.provider == "deepseek":
+                            import json
+                            payload_dict = json.loads(payload_str)
+                            decision_data = await query_deepseek(payload_dict, system_prompt=PRE_MARKET_SYSTEM_PROMPT)
+                        elif agent.provider == "ollama":
+                            decision_data = await query_ollama(payload_str, system_prompt=PRE_MARKET_SYSTEM_PROMPT)
+                    except Exception as ex:
+                        logger.error(f"Error querying {agent.name} pre-market: {ex}")
+                        continue
+                        
+                    if decision_data and isinstance(decision_data, dict):
+                        bias = decision_data.get("daily_bias", "NEUTRAL").upper()
+                        lower_lim = decision_data.get("entry_lower_limit")
+                        upper_lim = decision_data.get("entry_upper_limit")
+                        target = decision_data.get("target_price")
+                        sl = decision_data.get("stop_loss")
+                        reason = decision_data.get("reasoning", "Pre-market bias set.")
+                        
+                        strategy_record = AgentDailyStrategy(
+                            agent_id=agent.id,
+                            date=date.today(),
+                            symbol=symbol,
+                            daily_bias=bias,
+                            entry_lower_limit=float(lower_lim) if lower_lim else None,
+                            entry_upper_limit=float(upper_lim) if upper_lim else None,
+                            target_price=float(target) if target else None,
+                            stop_loss=float(sl) if sl else None,
+                            reasoning=reason
+                        )
+                        db.add(strategy_record)
+                        logger.info(f"Seeded pre-market setup for {agent.name} | {symbol} | Bias: {bias}")
+                db.commit()
+                await asyncio.sleep(1) # Kind to APIs
+        except Exception as e:
+            logger.error(f"Pre-market strategy session failed: {e}")
+            db.rollback()
+        finally:
+            db.close()
+            logger.info("=== PRE-MARKET STRATEGY SESSION END ===")

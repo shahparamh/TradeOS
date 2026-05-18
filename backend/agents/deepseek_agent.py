@@ -2,10 +2,11 @@ import httpx
 import json
 from config import settings
 from utils.logger import setup_logger
+from agents.prompts import SYSTEM_PROMPT
 
 logger = setup_logger("deepseek_agent")
 
-async def query_deepseek(payload: dict) -> dict:
+async def query_deepseek(payload: dict, system_prompt: str = None) -> dict:
     """
     Queries the official DeepSeek R1 (deepseek-reasoning) API.
     Handles R1 reasoning output and extracts structural trade instructions.
@@ -25,13 +26,14 @@ async def query_deepseek(payload: dict) -> dict:
         "Content-Type": "application/json"
     }
 
+    sys_content = system_prompt if system_prompt else f"You are a professional NSE stock trading model. You MUST respond in valid JSON format only. Reference rules:\n{SYSTEM_PROMPT}"
     # We use deepseek-reasoning to get full R1 deep-thinking capabilities!
     data = {
         "model": "deepseek-reasoning",
         "messages": [
             {
                 "role": "system",
-                "content": "You are a professional NSE stock trading model. You MUST respond in valid JSON format only."
+                "content": sys_content
             },
             {
                 "role": "user",

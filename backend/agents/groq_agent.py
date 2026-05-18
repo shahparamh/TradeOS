@@ -18,7 +18,7 @@ GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 # Keep track of the active working key index at the module level
 _current_key_index = 0
 
-async def query_groq(payload: str) -> dict:
+async def query_groq(payload: str, system_prompt: str = SYSTEM_PROMPT) -> dict:
     """
     Sends market data payload to Groq (Llama 3.3 70B) and returns a parsed trading decision.
     Uses stateful API key rotation to bypass rate limits gracefully.
@@ -44,7 +44,7 @@ async def query_groq(payload: str) -> dict:
         body = {
             "model": settings.GROQ_MODEL,
             "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": payload},
             ],
             "temperature": 0.3,

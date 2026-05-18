@@ -11,6 +11,8 @@ from api.routes_market import router as market_router
 from api.routes_scanner import router as scanner_router
 from api.routes_agents import router as agents_router
 from api.routes_broker import router as broker_router
+from api.routes_auth import router as auth_router
+from api.routes_settings import router as settings_router
 from scheduler.trading_loop import TradingScheduler
 
 # Initialize scheduler
@@ -21,8 +23,9 @@ Base.metadata.create_all(bind=engine)
 
 def seed_db():
     db = SessionLocal()
-    existing_names = {a.name for a in db.query(Agent).all()}
     
+    # 1. Seed default agents
+    existing_names = {a.name for a in db.query(Agent).all()}
     default_agents = [
         Agent(name="Gemini", model_name=settings.GEMINI_MODEL, provider="google", cash_balance=100000.0, total_pnl=0.0),
         Agent(name="Groq-Llama", model_name="llama-3.3-70b", provider="groq", cash_balance=100000.0, total_pnl=0.0),
@@ -30,10 +33,35 @@ def seed_db():
         Agent(name="DeepSeek-R1", model_name="deepseek-reasoning", provider="deepseek", cash_balance=100000.0, total_pnl=0.0),
         Agent(name="Local-Ollama", model_name="llama3.2", provider="ollama", cash_balance=100000.0, total_pnl=0.0)
     ]
-    
     for agent in default_agents:
         if agent.name not in existing_names:
             db.add(agent)
+
+    # 2. Seed default admin user
+    from database.models import User
+    from api.routes_auth import hash_password
+    admin_user = db.query(User).filter(User.username == "admin").first()
+    if not admin_user:
+        db.add(User(
+            username="admin",
+            email="admin@tradeos.ai",
+            hashed_password=hash_password("adminpassword"),
+            role="admin",
+            is_active=True
+        ))
+
+    # 3. Seed default trading rules
+    from database.models import SystemRule
+    rules_to_seed = [
+        ("enable_loss_lockout", "boolean", True, None, "Toggle single-stock daily loss lockout"),
+        ("enable_short_selling", "boolean", False, None, "Allow intraday short positions"),
+        ("min_profit_threshold_pct", "float", None, 0.015, "Minimum take profit percentage threshold (e.g., 0.015 for 1.5%)"),
+        ("enable_news_sentiment", "boolean", True, None, "Enable parsing of live RSS news sentiment inside trading loop")
+    ]
+    for key, val_type, b_val, n_val, desc in rules_to_seed:
+        existing = db.query(SystemRule).filter(SystemRule.key == key).first()
+        if not existing:
+            db.add(SystemRule(key=key, value_type=val_type, bool_value=b_val, numeric_value=n_val, description=desc))
             
     db.commit()
     db.close()
@@ -97,11 +125,18 @@ async def trigger_monitor_manually():
     await trading_scheduler.run_monitor_cycle()
     return {"status": "completed", "message": "Position monitor check completed"}
 
+@app.post("/api/scheduler/pre-market")
+async def trigger_pre_market_manually():
+    asyncio.create_task(trading_scheduler.run_pre_market_session())
+    return {"status": "triggered", "message": "Pre-market strategy planning started in background"}
+
 # Include routers
 app.include_router(market_router, prefix="/api")
 app.include_router(scanner_router, prefix="/api")
 app.include_router(agents_router, prefix="/api")
 app.include_router(broker_router, prefix="/api")
+app.include_router(auth_router, prefix="/api")
+app.include_router(settings_router, prefix="/api")
 
 if __name__ == "__main__":
     import uvicorn

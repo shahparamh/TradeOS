@@ -17,13 +17,32 @@ class RiskManager:
         self.daily_drawdown_limit = settings.DAILY_DRAWDOWN_LIMIT       # -0.05 (-5%)
         self.auto_square_off_time = settings.AUTO_SQUARE_OFF_TIME       # "15:15"
 
+    def get_rule(self, db, key: str, default):
+        from database.models import SystemRule
+        rule = db.query(SystemRule).filter(SystemRule.key == key).first()
+        if not rule:
+            return default
+        return rule.bool_value if rule.value_type == "boolean" else rule.numeric_value
+
     def validate_trade(self, decision: dict, agent_state: dict) -> dict:
         """
         Runs ALL risk checks on a proposed trade.
         """
+        from database.connection import SessionLocal
+        db = SessionLocal()
+        try:
+            enable_short = self.get_rule(db, "enable_short_selling", False)
+            enable_lockout = self.get_rule(db, "enable_loss_lockout", True)
+            min_profit_pct = self.get_rule(db, "min_profit_threshold_pct", 0.015)
+        finally:
+            db.close()
+
         checks = [
             self._check_market_hours(decision),
             self._check_circuit_breaker(agent_state),
+            self._check_no_short_selling(decision, enable_short),
+            self._check_daily_loss_lockout(decision, agent_state, enable_lockout),
+            self._check_minimum_profit_threshold(decision, min_profit_pct),
             self._check_position_limit(agent_state),
             self._check_intraday_trade_limit(decision, agent_state),
             self._check_duplicate_position(decision, agent_state),
@@ -158,4 +177,55 @@ class RiskManager:
                     "passed": False,
                     "reason": f"Already have open position in {symbol}"
                 }
+        return {"passed": True}
+
+    def _check_no_short_selling(self, decision: dict, enabled: bool) -> dict:
+        if not enabled and decision.get("decision") == "SHORT":
+            return {
+                "passed": False,
+                "reason": "SHORT_SELLING_DISABLED: Intraday short-selling is disabled by system settings. Only long positions (BUY) are allowed."
+            }
+        return {"passed": True}
+
+    def _check_daily_loss_lockout(self, decision: dict, agent_state: dict, enabled: bool) -> dict:
+        if not enabled:
+            return {"passed": True}
+            
+        from database.connection import SessionLocal
+        from database.models import Trade
+        from datetime import datetime, date
+        
+        db = SessionLocal()
+        try:
+            today_start = datetime.combine(date.today(), datetime.min.time())
+            
+            unlucky_trade = db.query(Trade).filter(
+                Trade.agent_id == decision.get("agent_id"),
+                Trade.symbol == decision.get("symbol"),
+                Trade.exit_time >= today_start,
+                Trade.pnl < 0
+            ).first()
+            
+            if unlucky_trade:
+                return {
+                    "passed": False,
+                    "reason": f"LOSS_LOCKOUT: Agent suffered a loss in {decision.get('symbol')} today. Dynamic loss lockout is active."
+                }
+            return {"passed": True}
+        finally:
+            db.close()
+
+    def _check_minimum_profit_threshold(self, decision: dict, min_profit_pct: float) -> dict:
+        entry = decision.get("entry_price") or decision.get("price")
+        target = decision.get("target")
+        
+        if not entry or not target:
+            return {"passed": True}
+            
+        profit_pct = (target - entry) / entry
+        if profit_pct < min_profit_pct:
+            return {
+                "passed": False,
+                "reason": f"PROFIT_THRESHOLD_REJECTED: Proposed profit margin ({profit_pct:.2%}) is below the required threshold of {min_profit_pct:.2%}. (Target: ₹{target}, Entry: ₹{entry})"
+            }
         return {"passed": True}
