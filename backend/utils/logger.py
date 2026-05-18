@@ -1,6 +1,19 @@
 import logging
 import os
+import sys
 from datetime import datetime
+
+# Reconfigure standard streams to UTF-8 on startup to prevent Windows console encoding crashes
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+if hasattr(sys.stderr, 'reconfigure'):
+    try:
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
 
 def setup_logger(name: str) -> logging.Logger:
     logger = logging.getLogger(name)
@@ -16,7 +29,7 @@ def setup_logger(name: str) -> logging.Logger:
         log_dir = os.path.join(os.path.dirname(__file__), "..", "..", "logs")
         os.makedirs(log_dir, exist_ok=True)
         today = datetime.now().strftime("%Y-%m-%d")
-        file_handler = logging.FileHandler(os.path.join(log_dir, f"tradeos_{today}.log"))
+        file_handler = logging.FileHandler(os.path.join(log_dir, f"tradeos_{today}.log"), encoding="utf-8")
         file_handler.setLevel(logging.DEBUG)
 
         # Format

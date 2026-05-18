@@ -1,13 +1,14 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from database.connection import SessionLocal
-from database.models import Agent, DailyPerformance, Trade, Position
+from database.models import Agent, DailyPerformance, Trade, Position, AIResponse
 from agents.agent_executor import execute_all_agents
 from data.data_aggregator import aggregate_market_context
 from data.market_fetcher import fetch_intraday_candles
 from scanner.technical_engine import calculate_all_indicators, generate_indicator_summary
 from scheduler.monitor import PositionMonitor
 from utils.logger import setup_logger
+from utils.constants import WATCHLIST
 from datetime import datetime, date
 import asyncio
 
@@ -73,7 +74,7 @@ class TradingScheduler:
             
         self.is_running_cycle = True
         db = SessionLocal()
-        logger.info("═══ TRADING CYCLE START ═══")
+        logger.info("=== TRADING CYCLE START ===")
         
         try:
             # 1. Market Context
@@ -82,12 +83,24 @@ class TradingScheduler:
             # 2. Get active agents
             agents = db.query(Agent).filter(Agent.is_active == True).all()
             
-            # 3. Watchlist symbols (Could be dynamic from a DB table)
-            symbols = ["RELIANCE.NS", "TCS.NS", "INFY.NS", "HDFCBANK.NS", "ICICIBANK.NS", "SBIN.NS"]
+            # 3. Watchlist symbols (Loaded dynamically from constants)
+            symbols = WATCHLIST
             
             for symbol in symbols:
+                # Cooldown check: Skip stocks analyzed in the last 5 minutes
+                from datetime import datetime, timedelta
+                five_mins_ago = datetime.utcnow() - timedelta(minutes=15)
+                recent_scan = db.query(AIResponse).filter(
+                    AIResponse.symbol == symbol,
+                    AIResponse.created_at >= five_mins_ago
+                ).first()
+                
+                if recent_scan:
+                    logger.info(f"Skipping {symbol} scan - recently analyzed in the last 5 minutes.")
+                    continue
+                    
                 logger.info(f"Scanning {symbol}...")
-                candles_df = fetch_intraday_candles(symbol, "5m", "1d")
+                candles_df = fetch_intraday_candles(symbol, "5m", "5d")
                 if candles_df.empty: continue
                 
                 indicators = generate_indicator_summary(calculate_all_indicators(candles_df), symbol)
@@ -108,7 +121,7 @@ class TradingScheduler:
         finally:
             db.close()
             self.is_running_cycle = False
-            logger.info("═══ TRADING CYCLE END ═══")
+            logger.info("=== TRADING CYCLE END ===")
 
     async def run_end_of_day(self):
         """Calculates daily performance for all agents."""

@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { TrendingUp, TrendingDown, BarChart2, RefreshCw, Activity, Cpu, Search } from 'lucide-react';
-import axios from 'axios';
-import { marketAPI } from '../services/api';
+import api, { marketAPI } from '../services/api';
 import CandlestickChart from '../components/CandlestickChart';
 
 
@@ -51,7 +50,7 @@ const Market = () => {
     else if (tf === '5y') { interval = '1d'; period = '5y'; }
 
     try {
-      const res = await axios.get(`http://localhost:8000/api/market/candles/${symbol}?interval=${interval}&period=${period}`);
+      const res = await api.get(`/market/candles/${symbol}?interval=${interval}&period=${period}`);
       const formatted = res.data.map(c => {
         const date = new Date(c.datetime);
         const time = Math.floor(date.getTime() / 1000);
@@ -92,7 +91,7 @@ const Market = () => {
     setAnalysisResult(null);
     try {
       const ticker = searchTicker.trim().toUpperCase();
-      const res = await axios.get(`http://localhost:8000/api/scanner/analyze/${ticker}`);
+      const res = await api.get(`/scanner/analyze/${ticker}`);
       if (res.data.status === 'success') {
         setAnalysisResult(res.data);
       } else {

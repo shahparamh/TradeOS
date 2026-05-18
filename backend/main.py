@@ -4,6 +4,7 @@ from database.connection import engine, SessionLocal
 from database.models import Base, Agent
 import asyncio
 from contextlib import asynccontextmanager
+from config import settings
 
 # Routers
 from api.routes_market import router as market_router
@@ -23,7 +24,7 @@ def seed_db():
     existing_names = {a.name for a in db.query(Agent).all()}
     
     default_agents = [
-        Agent(name="Gemini", model_name="gemini-2.0-flash", provider="google", cash_balance=100000.0, total_pnl=0.0),
+        Agent(name="Gemini", model_name=settings.GEMINI_MODEL, provider="google", cash_balance=100000.0, total_pnl=0.0),
         Agent(name="Groq-Llama", model_name="llama-3.3-70b", provider="groq", cash_balance=100000.0, total_pnl=0.0),
         Agent(name="Qwen-Free", model_name="qwen-2.5-72b", provider="openrouter", cash_balance=100000.0, total_pnl=0.0),
         Agent(name="DeepSeek-R1", model_name="deepseek-reasoning", provider="deepseek", cash_balance=100000.0, total_pnl=0.0),
@@ -104,4 +105,6 @@ app.include_router(broker_router, prefix="/api")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    import os
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)

@@ -25,7 +25,7 @@ def seed_agents():
             db.commit()
             
             agents = [
-                Agent(name="Gemini", provider="google", model_name="gemini-2.0-flash", cash_balance=settings.INITIAL_CAPITAL),
+                Agent(name="Gemini", provider="google", model_name=settings.GEMINI_MODEL, cash_balance=settings.INITIAL_CAPITAL),
                 Agent(name="Groq-Llama", provider="groq", model_name=settings.GROQ_MODEL, cash_balance=settings.INITIAL_CAPITAL),
             ]
             db.add_all(agents)

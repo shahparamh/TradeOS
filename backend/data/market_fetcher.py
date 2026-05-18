@@ -86,7 +86,7 @@ def fetch_index_data() -> dict:
     except Exception as e:
         logger.error(f"Error fetching index data: {str(e)}")
         return {}
-
+ 
 def fetch_bulk_prices(symbols: list) -> dict:
     try:
         # Batch download

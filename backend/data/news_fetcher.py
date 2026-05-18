@@ -45,40 +45,51 @@ def fetch_google_news(query: str, max_results: int = 5) -> list:
         logger.error(f"Error fetching Google News for {query}: {e}")
         return []
 
+_current_key_index = 0
+
 def fetch_newsapi_headlines(query: str, max_results: int = 5) -> list:
-    if not settings.NEWS_API_KEY or settings.NEWS_API_KEY == "placeholder":
+    global _current_key_index
+    keys = [k for k in settings.NEWS_API_KEYS if k and k != "placeholder"]
+    if not keys:
         return []
         
-    try:
-        url = "https://newsapi.org/v2/everything"
-        params = {
-            "q": f"{query} India stock",
-            "language": "en",
-            "sortBy": "publishedAt",
-            "pageSize": max_results,
-            "apiKey": settings.NEWS_API_KEY
-        }
-        response = requests.get(url, params=params, timeout=10)
+    num_keys = len(keys)
+    for i in range(num_keys):
+        idx = (_current_key_index + i) % num_keys
+        api_key = keys[idx]
         
-        if response.status_code == 200:
-            data = response.json()
-            articles = []
-            for item in data.get("articles", [])[:max_results]:
-                articles.append({
-                    "headline": item.get("title", ""),
-                    "source": "newsapi",
-                    "url": item.get("url", ""),
-                    "sentiment": tag_sentiment(item.get("title", "")),
-                    "published_at": item.get("publishedAt", ""),
-                    "query": query
-                })
-            return articles
-        else:
-            logger.warning(f"NewsAPI error: {response.text}")
-            return []
-    except Exception as e:
-        logger.error(f"Error fetching NewsAPI for {query}: {e}")
-        return []
+        try:
+            url = "https://newsapi.org/v2/everything"
+            params = {
+                "q": f"{query} India stock",
+                "language": "en",
+                "sortBy": "publishedAt",
+                "pageSize": max_results,
+                "apiKey": api_key
+            }
+            response = requests.get(url, params=params, timeout=10)
+            
+            if response.status_code == 200:
+                _current_key_index = idx # Save working key index
+                data = response.json()
+                articles = []
+                for item in data.get("articles", [])[:max_results]:
+                    articles.append({
+                        "headline": item.get("title", ""),
+                        "source": "newsapi",
+                        "url": item.get("url", ""),
+                        "sentiment": tag_sentiment(item.get("title", "")),
+                        "published_at": item.get("publishedAt", ""),
+                        "query": query
+                    })
+                return articles
+            else:
+                logger.warning(f"NewsAPI key {api_key[:6]}... failed (status {response.status_code}). Trying next key...")
+        except Exception as e:
+            logger.error(f"Error fetching NewsAPI with key {api_key[:6]}...: {e}")
+            
+    logger.error("All NewsAPI keys are exhausted or failed!")
+    return []
 
 def fetch_market_news() -> list:
     # Combine macro news

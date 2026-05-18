@@ -47,9 +47,9 @@ class PositionMonitor:
                     trade = self.db.query(Trade).get(pos.trade_id)
                     
                     if exit_reason == "SL_HIT":
-                        logger.warning(f"🛑 SL HIT for {pos.symbol} at {current_price}")
+                        logger.warning(f"[SL HIT] for {pos.symbol} at {current_price}")
                     else:
-                        logger.info(f"🎯 TARGET HIT for {pos.symbol} at {current_price}")
+                        logger.info(f"[TARGET HIT] for {pos.symbol} at {current_price}")
 
                     if pos.position_type == "LONG":
                         res = self.broker.sell(agent, trade, current_price, exit_reason, self.db)

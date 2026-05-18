@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Settings as SettingsIcon, Key, Shield, Bell, Zap, Database, Save, CheckCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
-import axios from 'axios';
+import api from '../services/api';
 
 const ToggleSwitch = ({ value, onChange }) => (
     <div className={`toggle-switch ${value ? 'on' : ''}`} onClick={() => onChange(!value)}>
@@ -183,7 +183,7 @@ const Settings = () => {
                             </div>
                             <button className="btn-primary" onClick={async () => {
                                 try {
-                                    await axios.post('http://localhost:8000/api/scheduler/trigger');
+                                    await api.post('/scheduler/trigger');
                                     toast.success('Main trading cycle triggered in background');
                                 } catch (e) { toast.error('Failed to trigger cycle'); }
                             }} style={{ padding: '6px 12px', fontSize: '11px' }}>
@@ -197,7 +197,7 @@ const Settings = () => {
                             </div>
                             <button className="btn-primary" onClick={async () => {
                                 try {
-                                    await axios.post('http://localhost:8000/api/scheduler/monitor');
+                                    await api.post('/scheduler/monitor');
                                     toast.success('Position check completed');
                                 } catch (e) { toast.error('Failed to run monitor'); }
                             }} style={{ padding: '6px 12px', fontSize: '11px' }}>

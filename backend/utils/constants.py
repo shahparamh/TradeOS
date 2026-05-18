@@ -1,17 +1,17 @@
 # Watchlist — Liquid NSE stocks for initial simulation
 WATCHLIST = [
-    "RELIANCE.NS",
-    "TCS.NS",
-    "INFY.NS",
-    "HDFCBANK.NS",
-    "ICICIBANK.NS",
+    "ANANTRAJ.NS",
+    "RCF.NS",
+    "GROWW.NS",
     "SBIN.NS",
-    "LT.NS",
-    "AXISBANK.NS",
-    "ITC.NS",
+    "PGEL.NS",
+    "TECHM.NS",
+    "LTM.NS",
     "BHARTIARTL.NS",
-    "BEL.NS",
-    "MARUTI.NS",
+    "OFSS.NS",
+    "COFORGE.NS",
+    "GLENMARK.NS",
+    "GESHIP.NS",
 ]
 
 # Indian market indices

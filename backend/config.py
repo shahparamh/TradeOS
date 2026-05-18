@@ -6,7 +6,9 @@ load_dotenv()
 class Settings:
     # LLM Keys
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+    GEMINI_API_KEYS: list = [k.strip() for k in os.getenv("GEMINI_API_KEYS", "").split(",") if k.strip()] or [os.getenv("GEMINI_API_KEY", "")]
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
     XAI_API_KEY: str = os.getenv("XAI_API_KEY", "")
     OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
@@ -16,6 +18,7 @@ class Settings:
 
     # News
     NEWS_API_KEY: str = os.getenv("NEWS_API_KEY", "")
+    NEWS_API_KEYS: list = [k.strip() for k in os.getenv("NEWS_API_KEYS", "").split(",") if k.strip()] or [os.getenv("NEWS_API_KEY", "")]
 
     # Database
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./tradeos.db")
@@ -37,7 +40,9 @@ class Settings:
 
     # Agent Models
     GROK_MODEL: str = "grok-4.20-reasoning"  # Updated based on user input
+    GROQ_API_KEYS: list = [k.strip() for k in os.getenv("GROQ_API_KEYS", "").split(",") if k.strip()] or [os.getenv("GROQ_API_KEY", "")]
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
     GROQ_MODEL: str = "llama-3.3-70b-versatile"  # Free tier on Groq
+    OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3.2")
 
 settings = Settings()

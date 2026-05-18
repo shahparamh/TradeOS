@@ -8,6 +8,7 @@ import httpx
 import json
 from agents.prompts import SYSTEM_PROMPT, parse_ai_response
 from utils.logger import setup_logger
+from config import settings
 
 logger = setup_logger("agent_ollama")
 
@@ -15,12 +16,12 @@ OLLAMA_API_URL = "http://localhost:11434/api/chat"
 
 async def query_ollama(payload: str) -> dict:
     """
-    Sends market data payload to local Ollama (Llama 3.2 3B) and returns parsed trading decision.
+    Sends market data payload to local Ollama and returns parsed trading decision.
     """
     start_time = time.time()
 
     body = {
-        "model": "llama3.2",
+        "model": settings.OLLAMA_MODEL,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": payload},
@@ -32,7 +33,7 @@ async def query_ollama(payload: str) -> dict:
     }
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=180.0) as client:
             response = await client.post(OLLAMA_API_URL, json=body)
 
         latency_ms = int((time.time() - start_time) * 1000)
@@ -66,7 +67,7 @@ async def query_ollama(payload: str) -> dict:
 
     except Exception as e:
         latency_ms = int((time.time() - start_time) * 1000)
-        logger.error(f"Ollama error: {str(e)}")
+        logger.exception("Ollama error")
         return {
             "agent": "Local-Ollama",
             "provider": "ollama",

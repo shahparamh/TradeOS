@@ -113,13 +113,22 @@ async def execute_all_agents(
                 # Risk Validation
                 risk_res = risk_manager.validate_trade(decision, agent_states[agent.name])
                 if risk_res["approved"]:
+                    current_price = opportunity.get("indicators", {}).get("price")
+                    if not current_price:
+                        # Defensive Fallback: fetch live price
+                        from data.market_fetcher import fetch_live_price
+                        try:
+                            current_price = fetch_live_price(opportunity["symbol"]).get("price")
+                        except Exception:
+                            current_price = decision.get("entry_price")
+
                     if decision["decision"] == "BUY":
                         broker.buy(agent, opportunity["symbol"], decision["quantity"], 
-                                   opportunity["indicators"]["price"], decision["stop_loss"], 
+                                   current_price, decision["stop_loss"], 
                                    decision["target"], decision["confidence"], "INTRADAY", db)
                     elif decision["decision"] == "SHORT":
                         broker.short_sell(agent, opportunity["symbol"], decision["quantity"], 
-                                          opportunity["indicators"]["price"], decision["stop_loss"], 
+                                          current_price, decision["stop_loss"], 
                                           decision["target"], decision["confidence"], db)
                 else:
                     logger.warning(f"Trade REJECTED for {agent_name}: {risk_res['rejection_reason']}")
