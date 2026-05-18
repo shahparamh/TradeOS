@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
-import { Settings as SettingsIcon, Key, Shield, Bell, Zap, Database, Save, CheckCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Settings as SettingsIcon, Key, Shield, Bell, Zap, Database, Save, CheckCircle, Newspaper } from 'lucide-react';
 import toast from 'react-hot-toast';
-import api from '../services/api';
+import api, { settingsAPI } from '../services/api';
 
 const ToggleSwitch = ({ value, onChange }) => (
     <div className={`toggle-switch ${value ? 'on' : ''}`} onClick={() => onChange(!value)}>
@@ -18,15 +18,50 @@ const Settings = () => {
         geminiEnabled: true,
         groqEnabled: true,
         scanInterval: 5,
-        maxTrades: 3,
         maxPositions: 5,
         capitalPerTrade: 20,
     });
 
-    const handleSave = () => {
-        toast.success('Configuration saved successfully!');
+    const [rules, setRules] = useState({
+        enable_loss_lockout: true,
+        enable_short_selling: false,
+        min_profit_threshold_pct: 0.015,
+        enable_news_sentiment: true
+    });
+    
+    const [loadingRules, setLoadingRules] = useState(true);
+
+    useEffect(() => {
+        const fetchRules = async () => {
+            try {
+                const response = await settingsAPI.getRules();
+                const data = response.data;
+                const loadedRules = {};
+                Object.keys(data).forEach(key => {
+                    loadedRules[key] = data[key].value;
+                });
+                setRules(loadedRules);
+            } catch (error) {
+                console.error("Failed to load rules", error);
+                toast.error("Could not fetch live trading rules from database.");
+            } finally {
+                setLoadingRules(false);
+            }
+        };
+        fetchRules();
+    }, []);
+
+    const handleSave = async () => {
+        try {
+            await settingsAPI.updateRules(rules);
+            toast.success('Dynamic safety rules and configuration saved successfully!');
+        } catch (error) {
+            console.error("Failed to save rules", error);
+            toast.error("Failed to save rules to database.");
+        }
     };
 
+    const setRule = (key, val) => setRules(prev => ({ ...prev, [key]: val }));
     const set = (key, val) => setConfig(prev => ({ ...prev, [key]: val }));
 
     return (
@@ -34,47 +69,81 @@ const Settings = () => {
             <header className="page-header">
                 <div>
                     <h1>System Settings</h1>
-                    <p className="subtitle">Configure trading parameters and system behavior</p>
+                    <p className="subtitle">Configure trading parameters, safety regulations, and AI behavior</p>
                 </div>
                 <button className="btn-primary" onClick={handleSave}>
-                    <Save size={15} /> Save Configuration
+                    <Save size={15} /> Save Rules & Config
                 </button>
             </header>
 
             <div className="settings-grid">
-                {/* Trading Rules */}
+                {/* Dynamic Trading Rules */}
                 <div className="card settings-card">
-                    <h3 className="section-title"><Shield size={16} /> Risk Management</h3>
+                    <h3 className="section-title"><Shield size={16} /> Dynamic Safety Regulations</h3>
+                    {loadingRules ? (
+                        <div className="page-loading">
+                            <span className="spin">⚡</span> Loading safety rules...
+                        </div>
+                    ) : (
+                        <div className="settings-rows">
+                            <div className="setting-row">
+                                <div>
+                                    <div className="sr-label">Single-Stock Loss Lockout</div>
+                                    <div className="sr-desc">Prevent buying a stock for the day if a loss occurred on it today</div>
+                                </div>
+                                <ToggleSwitch value={rules.enable_loss_lockout} onChange={v => setRule('enable_loss_lockout', v)} />
+                            </div>
+                            <div className="setting-row">
+                                <div>
+                                    <div className="sr-label">Intraday Short-Selling</div>
+                                    <div className="sr-desc">Permit agents to select SHORT sell positions during downtrends</div>
+                                </div>
+                                <ToggleSwitch value={rules.enable_short_selling} onChange={v => setRule('enable_short_selling', v)} />
+                            </div>
+                            <div className="setting-row">
+                                <div>
+                                    <div className="sr-label">Min Take-Profit Margin</div>
+                                    <div className="sr-desc">Block orders where targets yield less than required margin</div>
+                                </div>
+                                <div className="number-input">
+                                    <button onClick={() => setRule('min_profit_threshold_pct', Math.max(0.005, rules.min_profit_threshold_pct - 0.005))}>-</button>
+                                    <span>{(rules.min_profit_threshold_pct * 100).toFixed(1)}%</span>
+                                    <button onClick={() => setRule('min_profit_threshold_pct', Math.min(0.05, rules.min_profit_threshold_pct + 0.005))}>+</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                {/* News Sentiment Regulation */}
+                <div className="card settings-card">
+                    <h3 className="section-title"><Newspaper size={16} /> Live News Regulations</h3>
+                    <div className="settings-rows">
+                        <div className="setting-row">
+                            <div>
+                                <div className="sr-label">RSS News Stream Integration</div>
+                                <div className="sr-desc">Pass live news sentiment into AI prompts to dynamically adapt strategies</div>
+                            </div>
+                            <ToggleSwitch value={rules.enable_news_sentiment} onChange={v => setRule('enable_news_sentiment', v)} />
+                        </div>
+                    </div>
+                </div>
+
+                {/* AI Agents settings */}
+                <div className="card settings-card">
+                    <h3 className="section-title"><Zap size={16} /> Multi-Agent AI Core</h3>
                     <div className="settings-rows">
                         <div className="setting-row">
                             <div>
                                 <div className="sr-label">Auto Square-Off at 3:15 PM</div>
-                                <div className="sr-desc">Automatically close all positions before market close</div>
+                                <div className="sr-desc">Forcibly liquidate open positions before close (9:15 - 3:15 IST)</div>
                             </div>
                             <ToggleSwitch value={config.autoSquareOff} onChange={v => set('autoSquareOff', v)} />
                         </div>
                         <div className="setting-row">
                             <div>
-                                <div className="sr-label">Risk Alerts</div>
-                                <div className="sr-desc">Show warnings when positions approach stop-loss</div>
-                            </div>
-                            <ToggleSwitch value={config.riskAlerts} onChange={v => set('riskAlerts', v)} />
-                        </div>
-                        <div className="setting-row">
-                            <div>
-                                <div className="sr-label">Max Intraday Trades</div>
-                                <div className="sr-desc">Per agent, per day limit</div>
-                            </div>
-                            <div className="number-input">
-                                <button onClick={() => set('maxTrades', Math.max(1, config.maxTrades - 1))}>-</button>
-                                <span>{config.maxTrades}</span>
-                                <button onClick={() => set('maxTrades', Math.min(10, config.maxTrades + 1))}>+</button>
-                            </div>
-                        </div>
-                        <div className="setting-row">
-                            <div>
                                 <div className="sr-label">Max Open Positions</div>
-                                <div className="sr-desc">Across all agents simultaneously</div>
+                                <div className="sr-desc">Simultaneous live open positions across all agents</div>
                             </div>
                             <div className="number-input">
                                 <button onClick={() => set('maxPositions', Math.max(1, config.maxPositions - 1))}>-</button>
@@ -85,7 +154,7 @@ const Settings = () => {
                         <div className="setting-row">
                             <div>
                                 <div className="sr-label">Capital Per Trade</div>
-                                <div className="sr-desc">Max % of agent balance per trade</div>
+                                <div className="sr-desc">Max allocation % of simulated balance per trade</div>
                             </div>
                             <div className="number-input">
                                 <button onClick={() => set('capitalPerTrade', Math.max(5, config.capitalPerTrade - 5))}>-</button>
@@ -96,90 +165,51 @@ const Settings = () => {
                     </div>
                 </div>
 
-                {/* AI Agents */}
-                <div className="card settings-card">
-                    <h3 className="section-title"><Zap size={16} /> AI Agents</h3>
-                    <div className="settings-rows">
-                        <div className="setting-row">
-                            <div>
-                                <div className="sr-label">Gemini Flash</div>
-                                <div className="sr-desc">Google's Gemini 2.0 Flash model</div>
-                            </div>
-                            <ToggleSwitch value={config.geminiEnabled} onChange={v => set('geminiEnabled', v)} />
-                        </div>
-                        <div className="setting-row">
-                            <div>
-                                <div className="sr-label">Groq-Llama 70B</div>
-                                <div className="sr-desc">Meta's LLaMA 3.3 on Groq (fast inference)</div>
-                            </div>
-                            <ToggleSwitch value={config.groqEnabled} onChange={v => set('groqEnabled', v)} />
-                        </div>
-                        <div className="setting-row">
-                            <div>
-                                <div className="sr-label">Scan Interval</div>
-                                <div className="sr-desc">Minutes between market scans</div>
-                            </div>
-                            <div className="number-input">
-                                <button onClick={() => set('scanInterval', Math.max(1, config.scanInterval - 1))}>-</button>
-                                <span>{config.scanInterval} min</span>
-                                <button onClick={() => set('scanInterval', Math.min(60, config.scanInterval + 1))}>+</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Notifications */}
-                <div className="card settings-card">
-                    <h3 className="section-title"><Bell size={16} /> Notifications</h3>
-                    <div className="settings-rows">
-                        <div className="setting-row">
-                            <div>
-                                <div className="sr-label">Email Alerts</div>
-                                <div className="sr-desc">Receive trade notifications via email</div>
-                            </div>
-                            <ToggleSwitch value={config.emailNotif} onChange={v => set('emailNotif', v)} />
-                        </div>
-                        <div className="setting-row">
-                            <div>
-                                <div className="sr-label">Sound Alerts</div>
-                                <div className="sr-desc">Play audio when trades are executed</div>
-                            </div>
-                            <ToggleSwitch value={config.voiceAlerts} onChange={v => set('voiceAlerts', v)} />
-                        </div>
-                    </div>
-                </div>
-
                 {/* System Info */}
                 <div className="card settings-card">
-                    <h3 className="section-title"><Database size={16} /> System Info</h3>
+                    <h3 className="section-title"><Database size={16} /> PostgreSQL Terminal Specs</h3>
                     <div className="settings-rows">
                         <div className="info-row">
-                            <span>Database</span>
-                            <span className="text-profit">● Connected (SQLite)</span>
+                            <span>Database Connection</span>
+                            <span className="text-profit">● Neon PostgreSQL Serverless (AWS)</span>
                         </div>
                         <div className="info-row">
-                            <span>Backend</span>
-                            <span className="text-profit">● Running on :8000</span>
+                            <span>Session Guard</span>
+                            <span className="badge-pill safe">JWT Authenticated</span>
                         </div>
                         <div className="info-row">
-                            <span>TradeOS Version</span>
-                            <span>Phase 7 — v1.1.0</span>
+                            <span>Active Scheduler</span>
+                            <span>Phase 7 Scheduler Loop</span>
                         </div>
                         <div className="info-row">
-                            <span>Trading Mode</span>
-                            <span className="badge-pill info">Paper Trading</span>
+                            <span>Trading Environment</span>
+                            <span className="badge-pill info">Paper Trading Simulation</span>
                         </div>
                     </div>
                 </div>
 
-                {/* System Automation (Phase 7) */}
+                {/* System Automation (Scheduler Control) */}
                 <div className="card settings-card">
                     <h3 className="section-title"><Database size={16} /> System Automation</h3>
                     <div className="settings-rows">
                         <div className="setting-row">
                             <div>
-                                <div className="sr-label">Trading Loop</div>
-                                <div className="sr-desc">Next run: Mon 9:15 AM IST</div>
+                                <div className="sr-label">Pre-Market Planner (9:00 AM IST)</div>
+                                <div className="sr-desc">Trigger pre-market bias, boundaries, and trade rules setup</div>
+                            </div>
+                            <button className="btn-primary" onClick={async () => {
+                                try {
+                                    await api.post('/scheduler/pre-market');
+                                    toast.success('Pre-market strategy session triggered in background');
+                                } catch (e) { toast.error('Failed to trigger pre-market planner'); }
+                            }} style={{ padding: '6px 12px', fontSize: '11px' }}>
+                                Run Planner
+                            </button>
+                        </div>
+                        <div className="setting-row">
+                            <div>
+                                <div className="sr-label">Trading Loop Cycle (9:15 AM - 3:15 PM IST)</div>
+                                <div className="sr-desc">Trigger intraday agent scans and trade checks immediately</div>
                             </div>
                             <button className="btn-primary" onClick={async () => {
                                 try {
@@ -187,13 +217,13 @@ const Settings = () => {
                                     toast.success('Main trading cycle triggered in background');
                                 } catch (e) { toast.error('Failed to trigger cycle'); }
                             }} style={{ padding: '6px 12px', fontSize: '11px' }}>
-                                Trigger Now
+                                Trigger Loop
                             </button>
                         </div>
                         <div className="setting-row">
                             <div>
-                                <div className="sr-label">Position Monitor</div>
-                                <div className="sr-desc">Check all SL/TP hits manually</div>
+                                <div className="sr-label">Position SL/TP Monitor</div>
+                                <div className="sr-desc">Trigger manual stop-loss / take-profit tick update scans</div>
                             </div>
                             <button className="btn-primary" onClick={async () => {
                                 try {

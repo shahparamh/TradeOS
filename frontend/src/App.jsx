@@ -9,24 +9,49 @@ import Agents from './pages/Agents';
 import Market from './pages/Market';
 import Settings from './pages/Settings';
 import AgentDetail from './pages/AgentDetail';
+import Login from './pages/Login';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import './App.css';
+
+function AppContent() {
+  const { isAuthenticated, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <div className="loading-screen">
+        <div className="spin">⚡</div>
+        <span>INITIALIZING TERMINAL...</span>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Login />;
+  }
+
+  return (
+    <div className="app-container">
+      <Sidebar />
+      <main className="main-content">
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/positions" element={<Positions />} />
+          <Route path="/history" element={<History />} />
+          <Route path="/agents" element={<Agents />} />
+          <Route path="/agent/:agentId" element={<AgentDetail />} />
+          <Route path="/market" element={<Market />} />
+          <Route path="/settings" element={<Settings />} />
+        </Routes>
+      </main>
+    </div>
+  );
+}
 
 function App() {
   return (
     <Router>
-      <div className="app-container">
-        <Sidebar />
-        <main className="main-content">
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/positions" element={<Positions />} />
-            <Route path="/history" element={<History />} />
-            <Route path="/agents" element={<Agents />} />
-            <Route path="/agent/:agentId" element={<AgentDetail />} />
-            <Route path="/market" element={<Market />} />
-            <Route path="/settings" element={<Settings />} />
-          </Routes>
-        </main>
+      <AuthProvider>
+        <AppContent />
         <Toaster 
           position="bottom-right"
           toastOptions={{
@@ -37,7 +62,7 @@ function App() {
             },
           }}
         />
-      </div>
+      </AuthProvider>
     </Router>
   );
 }

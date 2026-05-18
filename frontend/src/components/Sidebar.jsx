@@ -10,7 +10,11 @@ import {
     Zap
 } from 'lucide-react';
 
+import { useAuth } from '../context/AuthContext';
+import { LogOut } from 'lucide-react';
+
 const Sidebar = () => {
+    const { user, logout } = useAuth();
     const navItems = [
         { name: 'Dashboard', icon: <LayoutDashboard size={20} />, path: '/' },
         { name: 'Live Positions', icon: <Briefcase size={20} />, path: '/positions' },
@@ -41,6 +45,17 @@ const Sidebar = () => {
             </nav>
 
             <div className="sidebar-footer">
+                {user && (
+                    <div className="user-profile-badge">
+                        <div className="user-info">
+                            <span className="user-name">{user.username}</span>
+                            <span className="user-role">{user.role}</span>
+                        </div>
+                        <button className="logout-btn" onClick={logout} title="Sign Out">
+                            <LogOut size={16} />
+                        </button>
+                    </div>
+                )}
                 <div className="market-status">
                     <div className="status-dot online"></div>
                     <span>System Live</span>

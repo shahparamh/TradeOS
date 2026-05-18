@@ -7,6 +7,35 @@ const api = axios.create({
     timeout: 15000,
 });
 
+// Interceptor to inject JWT token automatically
+api.interceptors.request.use((config) => {
+    const token = localStorage.getItem('tradeos_token');
+    if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+}, (error) => {
+    return Promise.reject(error);
+});
+
+export const authAPI = {
+    login: (username, password) => {
+        const params = new URLSearchParams();
+        params.append('username', username);
+        params.append('password', password);
+        return api.post('/auth/login', params, {
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+        });
+    },
+    register: (username, email, password) => api.post('/auth/register', { username, email, password }),
+    getMe: () => api.get('/auth/me'),
+};
+
+export const settingsAPI = {
+    getRules: () => api.get('/settings/rules'),
+    updateRules: (rules) => api.put('/settings/rules', { rules }),
+};
+
 export const marketAPI = {
     getIndices: () => api.get('/market/indices'),
     getPrice: (symbol) => api.get(`/market/price/${symbol}`),
