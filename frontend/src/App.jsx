@@ -10,6 +10,7 @@ import Market from './pages/Market';
 import Settings from './pages/Settings';
 import AgentDetail from './pages/AgentDetail';
 import Login from './pages/Login';
+import PreMarket from './pages/PreMarket';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import './App.css';
 
@@ -35,6 +36,7 @@ function AppContent() {
       <main className="main-content">
         <Routes>
           <Route path="/" element={<Dashboard />} />
+          <Route path="/pre-market" element={<PreMarket />} />
           <Route path="/positions" element={<Positions />} />
           <Route path="/history" element={<History />} />
           <Route path="/agents" element={<Agents />} />

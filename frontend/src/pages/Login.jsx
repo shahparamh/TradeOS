@@ -40,19 +40,8 @@ const Login = () => {
                     <p className="brand-subtitle">Autonomous Multi-Agent AI Trading Terminal</p>
                 </div>
 
-                <div className="login-tabs">
-                    <button 
-                        className={`tab-btn ${isLoginView ? 'active' : ''}`}
-                        onClick={() => { setIsLoginView(true); setUsername(''); setPassword(''); }}
-                    >
-                        Sign In
-                    </button>
-                    <button 
-                        className={`tab-btn ${!isLoginView ? 'active' : ''}`}
-                        onClick={() => { setIsLoginView(false); setUsername(''); setEmail(''); setPassword(''); setConfirmPassword(''); }}
-                    >
-                        Register
-                    </button>
+                <div className="login-tabs" style={{ display: 'none' }}>
+                    <button className="tab-btn active">Sign In</button>
                 </div>
 
                 <form className="login-form" onSubmit={handleSubmit}>
@@ -71,23 +60,6 @@ const Login = () => {
                         </div>
                     </div>
 
-                    {!isLoginView && (
-                        <div className="form-group">
-                            <label htmlFor="email">Email Address</label>
-                            <div className="input-wrapper">
-                                <span className="input-icon">✉️</span>
-                                <input 
-                                    type="email" 
-                                    id="email" 
-                                    placeholder="Enter your email" 
-                                    value={email}
-                                    onChange={(e) => setEmail(e.target.value)}
-                                    required 
-                                />
-                            </div>
-                        </div>
-                    )}
-
                     <div className="form-group">
                         <label htmlFor="password">Password</label>
                         <div className="input-wrapper">
@@ -103,23 +75,6 @@ const Login = () => {
                         </div>
                     </div>
 
-                    {!isLoginView && (
-                        <div className="form-group">
-                            <label htmlFor="confirmPassword">Confirm Password</label>
-                            <div className="input-wrapper">
-                                <span className="input-icon">🛡️</span>
-                                <input 
-                                    type="password" 
-                                    id="confirmPassword" 
-                                    placeholder="••••••••" 
-                                    value={confirmPassword}
-                                    onChange={(e) => setConfirmPassword(e.target.value)}
-                                    required 
-                                />
-                            </div>
-                        </div>
-                    )}
-
                     <button 
                         type="submit" 
                         className="submit-action-btn" 
@@ -128,29 +83,15 @@ const Login = () => {
                         {isLoading ? (
                             <div className="form-spinner"></div>
                         ) : (
-                            isLoginView ? 'Sign In to Terminal' : 'Create TradeOS Account'
+                            'Sign In to Terminal'
                         )}
                     </button>
                 </form>
 
-                <div className="login-card-footer">
-                    <p>
-                        {isLoginView 
-                            ? "Don't have an account? " 
-                            : "Already have a TradeOS account? "
-                        }
-                        <span 
-                            className="toggle-view-link"
-                            onClick={() => setIsLoginView(!isLoginView)}
-                        >
-                            {isLoginView ? 'Register here' : 'Sign in here'}
-                        </span>
+                <div className="login-card-footer" style={{ borderTop: 'none', paddingTop: '0' }}>
+                    <p style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                        🔒 Secure TradeOS Algo Terminal
                     </p>
-                    {isLoginView && (
-                        <p className="demo-credentials-hint">
-                            💡 Try signing in with <strong>admin</strong> and password <strong>adminpassword</strong>
-                        </p>
-                    )}
                 </div>
             </div>
         </div>

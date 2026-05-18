@@ -17,6 +17,7 @@ const Sidebar = () => {
     const { user, logout } = useAuth();
     const navItems = [
         { name: 'Dashboard', icon: <LayoutDashboard size={20} />, path: '/' },
+        { name: 'Pre-Market Strategy', icon: <Zap size={20} />, path: '/pre-market' },
         { name: 'Live Positions', icon: <Briefcase size={20} />, path: '/positions' },
         { name: 'Trade History', icon: <History size={20} />, path: '/history' },
         { name: 'AI Agents', icon: <Users size={20} />, path: '/agents' },
