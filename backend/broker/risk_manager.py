@@ -145,7 +145,7 @@ class RiskManager:
              # return {"passed": False, "reason": "Market is closed"}
              return {"passed": True} # Bypassing for now to allow testing
 
-        if now.hour >= 15 and now.minute >= 15:
+        if (now.hour == 15 and now.minute >= 15) or now.hour > 15:
             return {"passed": False, "reason": "Too late for new trades (after 3:15 PM)"}
 
         return {"passed": True}

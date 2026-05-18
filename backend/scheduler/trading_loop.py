@@ -56,11 +56,14 @@ class TradingScheduler:
         """Runs the position monitor to check for SL/TP hits."""
         db = SessionLocal()
         try:
-            monitor = PositionMonitor(db)
-            exits = await monitor.check_all_positions()
+            from broker.virtual_broker import VirtualBroker
+            from config import settings
+            broker = VirtualBroker(settings)
+            monitor = PositionMonitor(broker)
+            exits = await monitor.check_all_positions(db)
             if exits:
                 for ex in exits:
-                    logger.info(f"Monitor Exit: {ex['agent']} | {ex['symbol']} | {ex['exit_reason']} | PnL: {ex['pnl']}")
+                    logger.info(f"Monitor Exit: {ex['agent']} | {ex['symbol']} | {ex.get('reason', 'UNKNOWN')} | PnL: {ex.get('pnl', 0.0)}")
         except Exception as e:
             logger.error(f"Monitor cycle error: {e}")
         finally:

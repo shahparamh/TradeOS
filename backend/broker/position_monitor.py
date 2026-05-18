@@ -66,7 +66,7 @@ class PositionMonitor:
         
         # 1. Intraday Square-off (3:15 PM IST)
         if position.trade_type == "INTRADAY" or True: # Force check for all during simulation
-            if now.hour >= 15 and now.minute >= 15:
+            if (now.hour == 15 and now.minute >= 15) or now.hour > 15:
                 return "SQUARED_OFF"
 
         # 2. LONG Position Logic
