@@ -1,9 +1,18 @@
 import React, { useEffect, useRef } from 'react';
 import { createChart, CrosshairMode, CandlestickSeries } from 'lightweight-charts';
 
-const CandlestickChart = ({ data, markers = [], height = 500 }) => {
+const CandlestickChart = ({ 
+    data, 
+    markers = [], 
+    height = 500, 
+    liveTick = null,
+    entryPrice = null,
+    targetPrice = null,
+    stopLoss = null
+}) => {
     const chartContainerRef = useRef(null);
     const chartRef = useRef(null);
+    const seriesRef = useRef(null);
 
     useEffect(() => {
         if (!chartContainerRef.current) return;
@@ -43,13 +52,47 @@ const CandlestickChart = ({ data, markers = [], height = 500 }) => {
         });
 
         candlestickSeries.setData(data);
+        seriesRef.current = candlestickSeries;
+
+        // Draw Entry, Target, and Stop Loss Price Lines
+        if (entryPrice) {
+            candlestickSeries.createPriceLine({
+                price: Number(entryPrice),
+                color: '#3b82f6', // Blue for Entry
+                lineWidth: 2,
+                lineStyle: 2, // Dashed
+                axisLabelVisible: true,
+                title: 'Entry Price',
+            });
+        }
+
+        if (targetPrice) {
+            candlestickSeries.createPriceLine({
+                price: Number(targetPrice),
+                color: '#22c55e', // Green for Target
+                lineWidth: 2,
+                lineStyle: 2, // Dashed
+                axisLabelVisible: true,
+                title: 'Target (TGT)',
+            });
+        }
+
+        if (stopLoss) {
+            candlestickSeries.createPriceLine({
+                price: Number(stopLoss),
+                color: '#ef4444', // Red for Stop Loss
+                lineWidth: 2,
+                lineStyle: 2, // Dashed
+                axisLabelVisible: true,
+                title: 'Stop Loss (SL)',
+            });
+        }
 
         if (markers.length > 0) {
             candlestickSeries.setMarkers(markers);
         }
 
         chart.timeScale().fitContent();
-
         chartRef.current = chart;
 
         const handleResize = () => {
@@ -62,7 +105,24 @@ const CandlestickChart = ({ data, markers = [], height = 500 }) => {
             window.removeEventListener('resize', handleResize);
             chart.remove();
         };
-    }, [data, markers, height]);
+    }, [data, markers, height, entryPrice, targetPrice, stopLoss]);
+
+    // Handle incoming continuous live price ticks
+    useEffect(() => {
+        if (seriesRef.current && liveTick) {
+            const timeVal = liveTick.time 
+                ? (String(liveTick.time).length > 10 ? Math.floor(liveTick.time / 1000) : liveTick.time)
+                : Math.floor(Date.now() / 1000);
+            
+            seriesRef.current.update({
+                time: timeVal,
+                open: liveTick.open || liveTick.price,
+                high: liveTick.high || liveTick.price,
+                low: liveTick.low || liveTick.price,
+                close: liveTick.price
+            });
+        }
+    }, [liveTick]);
 
     return <div ref={chartContainerRef} style={{ position: 'relative', width: '100%' }} />;
 };
