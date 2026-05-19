@@ -142,17 +142,22 @@ const Positions = () => {
 
         try {
             const res = await api.get(`/market/candles/${symbol}?interval=${interval}&period=${period}`);
-            const formatted = res.data.map(c => {
-                const date = new Date(c.datetime);
-                const time = Math.floor(date.getTime() / 1000);
-                return {
-                    time: time,
-                    open: c.open,
-                    high: c.high,
-                    low: c.low,
-                    close: c.close
-                };
-            }).sort((a, b) => a.time - b.time);
+            const formatted = res.data
+                .filter(c => c && c.open !== null && c.high !== null && c.low !== null && c.close !== null)
+                .map(c => {
+                    const date = new Date(c.datetime);
+                    const time = Math.floor(date.getTime() / 1000);
+                    return {
+                        time: time,
+                        open: Number(c.open),
+                        high: Number(c.high),
+                        low: Number(c.low),
+                        close: Number(c.close)
+                    };
+                })
+                .filter(c => !isNaN(c.time) && !isNaN(c.open) && !isNaN(c.high) && !isNaN(c.low) && !isNaN(c.close))
+                .filter((value, index, self) => self.findIndex(t => t.time === value.time) === index)
+                .sort((a, b) => a.time - b.time);
             setChartData(formatted);
         } catch (err) {
             console.error("Failed to load chart data:", err);
