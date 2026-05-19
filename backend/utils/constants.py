@@ -2,16 +2,15 @@
 WATCHLIST = [
     "ANANTRAJ.NS",
     "RCF.NS",
-    "GROWW.NS",
     "SBIN.NS",
     "PGEL.NS",
     "TECHM.NS",
     "LTM.NS",
     "BHARTIARTL.NS",
-    "OFSS.NS",
-    "COFORGE.NS",
-    "GLENMARK.NS",
-    "GESHIP.NS",
+    "HFCL.NS",
+    "INFY.NS",
+    "HCLTECH.NS",
+    "BSE.NS",
 ]
 
 # Indian market indices
