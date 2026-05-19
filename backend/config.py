@@ -11,6 +11,7 @@ class Settings:
     GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
     XAI_API_KEY: str = os.getenv("XAI_API_KEY", "")
+    OPENROUTER_API_KEYS: list = [k.strip() for k in os.getenv("OPENROUTER_API_KEYS", "").split(",") if k.strip()] or [os.getenv("OPENROUTER_API_KEY", "")]
     OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
     DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY", "")
 
