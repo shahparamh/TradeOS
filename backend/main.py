@@ -45,10 +45,12 @@ def seed_db():
         db.add(User(
             username="admin",
             email="admin@tradeos.ai",
-            hashed_password=hash_password("adminpassword"),
+            hashed_password=hash_password("admin1234"),
             role="admin",
             is_active=True
         ))
+    else:
+        admin_user.hashed_password = hash_password("admin1234")
 
     # 3. Seed default trading rules
     from database.models import SystemRule
