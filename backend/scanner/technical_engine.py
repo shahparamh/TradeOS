@@ -68,6 +68,29 @@ def calculate_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["support_1"] = (2 * df["pivot"]) - df["High"].shift(1)
     df["resistance_1"] = (2 * df["pivot"]) - df["Low"].shift(1)
 
+    # --- Candlestick Patterns ---
+    body = (df["Close"] - df["Open"]).abs()
+    total_range = df["High"] - df["Low"]
+    df["doji"] = np.where((body <= 0.1 * total_range) & (total_range > 0), True, False)
+    
+    lower_wick = np.minimum(df["Open"], df["Close"]) - df["Low"]
+    upper_wick = df["High"] - np.maximum(df["Open"], df["Close"])
+    df["hammer"] = np.where(
+        (lower_wick >= 2 * body) & 
+        (upper_wick <= 0.2 * total_range) & 
+        (total_range > 0), 
+        True, 
+        False
+    )
+    
+    prev_open = df["Open"].shift(1)
+    prev_close = df["Close"].shift(1)
+    prev_body = (prev_close - prev_open).abs()
+    
+    bullish_engulfing = (df["Close"] > df["Open"]) & (prev_close < prev_open) & (df["Open"] <= prev_close) & (df["Close"] >= prev_open) & (body > prev_body)
+    bearish_engulfing = (df["Close"] < df["Open"]) & (prev_close > prev_open) & (df["Open"] >= prev_close) & (df["Close"] <= prev_open) & (body > prev_body)
+    df["engulfing"] = np.where(bullish_engulfing, "Bullish Engulfing", np.where(bearish_engulfing, "Bearish Engulfing", "None"))
+
     return df
 
 def generate_indicator_summary(df: pd.DataFrame, symbol: str) -> dict:
@@ -139,10 +162,20 @@ def generate_indicator_summary(df: pd.DataFrame, symbol: str) -> dict:
     else:
         bb_position = "lower_half"
 
+    # Detect active candlestick pattern
+    pattern = "None"
+    if latest.get("doji") == True or latest.get("doji") == 1:
+        pattern = "Doji"
+    elif latest.get("hammer") == True or latest.get("hammer") == 1:
+        pattern = "Hammer"
+    elif latest.get("engulfing") != "None" and latest.get("engulfing") is not None:
+        pattern = str(latest.get("engulfing"))
+
     return {
         "symbol": symbol,
         "price": close_price,
         "rsi": clean_float(latest.get("rsi", 50.0), decimals=1),
+        "candlestick_pattern": pattern,
         "macd": macd_signal,
         "macd_histogram": clean_float(latest.get("macd_histogram", 0.0)),
         "ema_20": ema20,

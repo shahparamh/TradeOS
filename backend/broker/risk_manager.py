@@ -12,9 +12,9 @@ logger = setup_logger("risk_manager")
 class RiskManager:
     def __init__(self, settings):
         self.max_capital_per_trade = settings.MAX_CAPITAL_PER_TRADE     # 0.20 (20%)
-        self.max_open_positions = settings.MAX_OPEN_POSITIONS           # 5
+        self.max_open_positions = 3                                     # Strict Layer 4 Guardrail: max 3 simultaneous open positions
         self.max_intraday_trades = settings.MAX_INTRADAY_TRADES         # 3
-        self.daily_drawdown_limit = settings.DAILY_DRAWDOWN_LIMIT       # -0.05 (-5%)
+        self.daily_drawdown_limit = -0.02                               # Strict Layer 4 Guardrail: halt all trading if daily drawdown < -2%
         self.auto_square_off_time = settings.AUTO_SQUARE_OFF_TIME       # "15:15"
 
     def get_rule(self, db, key: str, default):
@@ -26,7 +26,7 @@ class RiskManager:
 
     def validate_trade(self, decision: dict, agent_state: dict) -> dict:
         """
-        Runs ALL risk checks on a proposed trade.
+        Runs ALL risk checks on a proposed trade, combining prompt heuristics and hardcoded outer Python guardrails.
         """
         from database.connection import SessionLocal
         db = SessionLocal()
@@ -39,7 +39,9 @@ class RiskManager:
 
         checks = [
             self._check_market_hours(decision),
-            self._check_circuit_breaker(agent_state),
+            self._check_time_of_day_filters(decision), # Strict Layer 1 Time-of-day rule
+            self._check_min_confidence(decision),      # Strict Layer 4 Confidence rule
+            self._check_circuit_breaker(agent_state),  # Strict Layer 4 Drawdowns & Losses rule
             self._check_no_short_selling(decision, enable_short),
             self._check_daily_loss_lockout(decision, agent_state, enable_lockout),
             self._check_minimum_profit_threshold(decision, min_profit_pct),
@@ -49,7 +51,8 @@ class RiskManager:
             self._check_per_stock_daily_limit(decision, agent_state),
             self._check_stop_loss_distance(decision),
             self._check_risk_reward_ratio(decision),
-            self._check_capital_limit(decision, agent_state), # Last, as it may adjust quantity
+            self._check_single_trade_risk(decision, agent_state), # Strict Layer 4 1% Trade risk rule
+            self._check_capital_limit(decision, agent_state),      # Last, as it may adjust quantity
         ]
 
         for check in checks:
@@ -63,23 +66,104 @@ class RiskManager:
         return {"approved": True, "warnings": []}
 
     def _check_circuit_breaker(self, agent_state: dict) -> dict:
-        # Check daily drawdown
+        # Check daily drawdown dynamically from database
         initial_cap = agent_state.get("initial_capital", 100000)
-        drawdown = agent_state["today_pnl"] / initial_cap
+        agent_name = agent_state.get("agent_name")
         
-        if drawdown < self.daily_drawdown_limit:
+        from database.connection import SessionLocal
+        from database.models import Agent, Trade
+        from datetime import datetime, date
+        
+        db = SessionLocal()
+        try:
+            agent = db.query(Agent).filter(Agent.name == agent_name).first()
+            if not agent:
+                return {"passed": True}
+                
+            today_start = datetime.combine(date.today(), datetime.min.time())
+            trades_today = db.query(Trade).filter(
+                Trade.agent_id == agent.id,
+                Trade.entry_time >= today_start
+            ).order_by(Trade.entry_time.desc()).all()
+            
+            today_pnl = sum([t.pnl for t in trades_today if t.pnl])
+            drawdown = today_pnl / initial_cap
+            
+            if drawdown < self.daily_drawdown_limit:
+                return {
+                    "passed": False,
+                    "reason": f"CIRCUIT_BREAKER_ACTIVE: Daily loss drawdown {drawdown:.1%} exceeds strict limit of {self.daily_drawdown_limit:.1%}."
+                }
+                
+            consecutive_losses = 0
+            for t in trades_today:
+                if t.pnl is not None:
+                    if t.pnl < 0:
+                        consecutive_losses += 1
+                    else:
+                        break
+                        
+            if consecutive_losses >= 3:
+                return {
+                    "passed": False,
+                    "reason": f"CIRCUIT_BREAKER_ACTIVE: Agent hit {consecutive_losses} consecutive losses today. Paused for capital protection."
+                }
+        finally:
+            db.close()
+            
+        return {"passed": True}
+
+    def _check_min_confidence(self, decision: dict) -> dict:
+        confidence = decision.get("confidence", 100)
+        if confidence < 65:
             return {
                 "passed": False,
-                "reason": f"CIRCUIT BREAKER: Daily drawdown {drawdown:.1%} exceeds limit {self.daily_drawdown_limit:.1%}"
+                "reason": f"MIN_CONFIDENCE_REJECTED: Model confidence {confidence} is below the hard guardrail floor of 65."
             }
+        return {"passed": True}
 
-        # Check consecutive losses
-        if agent_state.get("consecutive_losses", 0) >= 3:
-            return {
-                "passed": False,
-                "reason": f"CIRCUIT BREAKER: {agent_state['consecutive_losses']} consecutive losses"
-            }
+    def _check_single_trade_risk(self, decision: dict, agent_state: dict) -> dict:
+        initial_cap = agent_state.get("initial_capital", 100000)
+        entry = decision.get("entry_price") or decision.get("price")
+        sl = decision.get("stop_loss")
+        qty = decision.get("quantity", 0)
+        
+        if entry and sl and qty:
+            risk = abs(entry - sl) * qty
+            max_risk = initial_cap * 0.01  # MAX_SINGLE_TRADE_RISK_PCT = 1.0%
+            if risk > max_risk:
+                adjusted_qty = int(max_risk / abs(entry - sl))
+                if adjusted_qty < 1:
+                    return {
+                        "passed": False,
+                        "reason": f"RISK_LIMIT_EXCEEDED: Proposed risk ₹{risk:,.0f} exceeds max allowed risk ₹{max_risk:,.0f} (1% of capital). Entry: ₹{entry}, SL: ₹{sl}."
+                    }
+                decision["quantity"] = adjusted_qty
+                logger.info(f"Dynamically adjusted quantity down to {adjusted_qty} to keep single trade risk below 1% of capital (₹{max_risk}).")
+        return {"passed": True}
 
+    def _check_time_of_day_filters(self, decision: dict) -> dict:
+        now = get_ist_now()
+        # Enforce strict Layer 1 time-of-day filters:
+        # - 09:15–09:30 IST: No entries (opening volatility)
+        # - 09:30–14:00 IST: Normal intraday entries permitted
+        # - 14:00–15:00 IST: Only exit or HOLD. No new entries.
+        # - 15:00–15:15 IST: Square off all positions.
+        
+        current_time_str = now.strftime("%H:%M")
+        
+        # Enforce if it's a decision to enter (BUY or SHORT)
+        if decision.get("decision") in ["BUY", "SHORT"]:
+            if "09:15" <= current_time_str < "09:30":
+                return {
+                    "passed": False,
+                    "reason": f"TIME_FILTER_REJECTED: Entry requested at {current_time_str}. Opening 15 minutes (09:15–09:30 IST) are noise-heavy; no entries allowed."
+                }
+            if current_time_str >= "14:00":
+                return {
+                    "passed": False,
+                    "reason": f"TIME_FILTER_REJECTED: Entry requested at {current_time_str}. Entries are disabled after 14:00 IST (2:00 PM)."
+                }
         return {"passed": True}
 
     def _check_capital_limit(self, decision: dict, agent_state: dict) -> dict:

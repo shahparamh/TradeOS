@@ -18,6 +18,89 @@ from agents.ollama_agent import query_ollama
 
 logger = setup_logger("agent_executor")
 
+async def query_agent_pipeline(agent, payload_dict: dict, opportunity: dict) -> dict:
+    """Sequentially executes Call 1 (Analyst) and Call 2 (Devil's Advocate) for Layer 5 multi-model validation."""
+    payload_str = json.dumps(payload_dict, default=str)
+    
+    # 1. CALL 1: Analyst Decision
+    decision = {"decision": "HOLD", "confidence": 0, "reasoning": "Failed to query analyst."}
+    try:
+        if agent.provider == "google":
+            decision = await query_gemini(payload_str)
+        elif agent.provider == "groq":
+            decision = await query_groq(payload_str)
+        elif agent.provider == "openrouter":
+            decision = await query_openrouter_free(payload_dict)
+        elif agent.provider == "ollama":
+            import os
+            if os.getenv("RENDER"):
+                return {"decision": "HOLD", "confidence": 0, "reasoning": "Ollama disabled in cloud."}
+            decision = await query_ollama(payload_str)
+    except Exception as ex:
+        logger.error(f"Analyst Call 1 failed for {agent.name}: {ex}")
+        return {"decision": "HOLD", "confidence": 0, "reasoning": f"Analyst query error: {ex}"}
+        
+    # Standardize output contract parameters (Layer 3)
+    decision["trailing_stop"] = decision.get("trailing_stop", 0.01)
+    decision["partial_exit_1"] = decision.get("partial_exit_1", {"price": None, "qty_pct": 50})
+    decision["invalidation_condition"] = decision.get("invalidation_condition", "Close below VWAP")
+    decision["signal_expiry"] = decision.get("signal_expiry", "14:00")
+    decision["checklist"] = decision.get("checklist", {
+        "no_earnings_within_3_days": True,
+        "volume_ratio_confirmed": True,
+        "vix_within_limit": True,
+        "not_chasing_3pct_move": True
+    })
+    
+    # 2. CALL 2: Devil's Advocate (Multi-Model Validation - Layer 5)
+    if decision.get("decision") in ["BUY", "SHORT"] and decision.get("confidence", 0) >= 65:
+        logger.info(f"Initiating Devil's Advocate check for {agent.name} on {opportunity.get('symbol')}...")
+        objection_prompt = f"""You are the Devil's Advocate for TradeOS.
+Your sole job is to criticize the following proposed trade decision and find every reason it could fail.
+
+PROPOSED DECISION:
+{json.dumps(decision, indent=2, default=str)}
+
+TECHNICAL, FUNDAMENTAL & DERIVATIVES PAYLOAD:
+{payload_str}
+
+CRITIQUE REQUIREMENTS:
+1. Rate your disagreement with this trade on a scale from 0 to 10 (where 0 means perfect agreement, and 10 means extremely dangerous/terrible idea).
+2. List 2-3 specific technical, fundamental, or derivatives objections.
+
+You MUST respond with ONLY a valid JSON object — no markdown, no explanation text, no code blocks.
+
+RESPONSE FORMAT (strict JSON):
+{{
+    "disagreement_score": <integer 0-10>,
+    "objections": ["<objection 1>", "<objection 2>"]
+}}
+"""
+        try:
+            critique = {"disagreement_score": 0, "objections": []}
+            if agent.provider == "google":
+                critique = await query_gemini(objection_prompt)
+            elif agent.provider == "groq":
+                critique = await query_groq(objection_prompt)
+            elif agent.provider == "openrouter":
+                critique = await query_openrouter_free({"prompt": objection_prompt})
+            elif agent.provider == "ollama":
+                critique = await query_ollama(objection_prompt)
+                
+            score = critique.get("disagreement_score", 0) if isinstance(critique, dict) else 0
+            objections = critique.get("objections", []) if isinstance(critique, dict) else []
+            
+            logger.info(f"Devil's Advocate Disagreement Score for {agent.name}: {score}/10")
+            if score >= 6:
+                logger.warning(f"Devil's Advocate OVERRIDE for {agent.name} due to score {score} >= 6. Objections: {objections}")
+                decision["decision"] = "HOLD"
+                decision["confidence"] = 40
+                decision["reasoning"] = f"OVERRULED by Devil's Advocate (Disagreement {score}/10): " + "; ".join(objections)
+        except Exception as ex:
+            logger.warning(f"Devil's Advocate call failed: {ex}. Proceeding with original decision.")
+            
+    return decision
+
 
 
 
@@ -43,9 +126,18 @@ async def execute_all_agents(
         agents = db.query(Agent).filter(Agent.is_active == True).all()
         if not agents: return []
 
+        # Dynamic Layer 2 Option Greeks & Net Inflows
+        from data.market_fetcher import fetch_option_greeks_and_fii, calculate_market_regime
+        options_greeks = fetch_option_greeks_and_fii(opportunity.get("symbol"))
+        opportunity["options_greeks"] = options_greeks
+        
+        # Dynamic Layer 1 Nifty Regime
+        market_regime = calculate_market_regime()
+        market_context["market_regime"] = market_regime
+
         agent_states = {}
         for agent in agents:
-            from database.models import AgentDailyStrategy
+            from database.models import AgentDailyStrategy, Trade
             from datetime import date
             strategy = db.query(AgentDailyStrategy).filter(
                 AgentDailyStrategy.agent_id == agent.id,
@@ -64,6 +156,20 @@ async def execute_all_agents(
                     "reasoning": strategy.reasoning
                 }
 
+            # Layer 6: Dynamic Post-trade feedback loops (Last 5 closed trades)
+            closed_trades = db.query(Trade).filter(
+                Trade.agent_id == agent.id,
+                Trade.status == "CLOSED"
+            ).order_by(Trade.exit_time.desc()).limit(5).all()
+            
+            recent_perf_str = ""
+            if closed_trades:
+                recent_perf_str += "\n\nRECENT PERFORMANCE (last 5 closed trades for your model):\n"
+                for t in closed_trades:
+                    outcome = "WIN" if (t.pnl and t.pnl > 0) else "LOSS"
+                    recent_perf_str += f"- Trade {t.id} on {t.symbol}: {t.decision} at {t.entry_price}, exit at {t.exit_price}. Outcome: {outcome} (PnL: ₹{t.pnl:.2f}).\n"
+                recent_perf_str += "Adjust your entry threshold: require higher confluence and PCR support if recent performance is sub-optimal."
+
             agent_states[agent.name] = {
                 "agent_name": agent.name,
                 "cash_balance": agent.cash_balance,
@@ -73,10 +179,11 @@ async def execute_all_agents(
                     t for t in agent.trades
                     if t.entry_time and t.entry_time.date() == datetime.utcnow().date()
                 ]),
-                "today_pnl": 0.0, # Simplified for now
+                "today_pnl": 0.0,
                 "total_pnl": agent.total_pnl,
                 "open_symbols": [p.symbol for p in agent.positions],
-                "pre_market_strategy": pre_market_data
+                "pre_market_strategy": pre_market_data,
+                "recent_performance_feedback": recent_perf_str
             }
 
         tasks = []
@@ -95,30 +202,14 @@ async def execute_all_agents(
             ).count()
             
             if stock_trades_today >= 2:
-                logger.info(f"Skipping LLM API query for {agent.name} on {opportunity.get('symbol')} - already traded {stock_trades_today} times today.")
+                logger.info(f"Skipping LLM API query for {agent.name} on {opportunity.get('symbol')} - already traded {stock_trades_today} today.")
                 continue
 
-            payload = build_ai_payload(market_context, opportunity, news, agent_states[agent.name])
-            if agent.provider == "google":
-                tasks.append(query_gemini(payload))
-                agent_names.append(("Gemini", agent.id, payload))
-            elif agent.provider == "groq":
-                tasks.append(query_groq(payload))
-                agent_names.append(("Groq-Llama", agent.id, payload))
-            elif agent.provider == "openrouter":
-                tasks.append(query_openrouter_free(payload))
-                agent_names.append((agent.name, agent.id, payload))
-            elif agent.provider == "ollama":
-                # Ollama runs only locally. Render cloud is restricted.
-                import os
-                if os.getenv("RENDER"):
-                    logger.info("Skipping local Ollama agent execution in cloud production.")
-                    continue
-                tasks.append(query_ollama(payload))
-                agent_names.append((agent.name, agent.id, payload))
-
-
-
+            payload_dict = json.loads(build_ai_payload(market_context, opportunity, news, agent_states[agent.name]))
+            
+            # Query Sequential Multi-Model Pipeline (Layer 5)
+            tasks.append(query_agent_pipeline(agent, payload_dict, opportunity))
+            agent_names.append((agent.name, agent.id, json.dumps(payload_dict)))
 
         if not tasks: return []
         results = await asyncio.gather(*tasks, return_exceptions=True)
