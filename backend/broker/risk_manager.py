@@ -157,6 +157,9 @@ class RiskManager:
         return {"passed": True}
 
     def _check_time_of_day_filters(self, decision: dict) -> dict:
+        if decision.get("ignore_hours"):
+            return {"passed": True}
+            
         now = get_ist_now()
         current_time_str = now.strftime("%H:%M")
         hour_float = now.hour + now.minute / 60.0
@@ -256,6 +259,9 @@ class RiskManager:
         return {"passed": True}
 
     def _check_market_hours(self, decision: dict) -> dict:
+        if decision.get("ignore_hours"):
+            return {"passed": True}
+            
         now = get_ist_now()
         if not is_market_open():
              # For manual testing, we might want to bypass this

@@ -147,7 +147,7 @@ def get_scheduler_status():
 @app.post("/api/scheduler/trigger")
 async def trigger_cycle_manually():
     # Trigger in background so request doesn't timeout
-    asyncio.create_task(trading_scheduler.run_trading_cycle())
+    asyncio.create_task(trading_scheduler.run_trading_cycle(ignore_hours=True))
     return {"status": "triggered", "message": "Trading cycle started in background"}
 
 @app.post("/api/scheduler/monitor")

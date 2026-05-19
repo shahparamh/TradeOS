@@ -78,7 +78,7 @@ class TradingScheduler:
         finally:
             db.close()
 
-    async def run_trading_cycle(self):
+    async def run_trading_cycle(self, ignore_hours: bool = False):
         """Executes the full trading pipeline."""
         if self.is_running_cycle:
             logger.warning("Cycle already in progress, skipping...")
@@ -88,18 +88,19 @@ class TradingScheduler:
         ist = timezone(timedelta(hours=5, minutes=30))
         now = datetime.now(ist)
         
-        # 1. Market Days Check (0=Mon, 4=Fri)
-        if now.weekday() > 4:
-            logger.info("Market is closed (Weekend). Skipping trading cycle to save API keys.")
-            return
+        if not ignore_hours:
+            # 1. Market Days Check (0=Mon, 4=Fri)
+            if now.weekday() > 4:
+                logger.info("Market is closed (Weekend). Skipping trading cycle to save API keys.")
+                return
+                
+            # 2. Market Hours Check (9:15 AM to 3:15 PM)
+            market_start = now.replace(hour=9, minute=15, second=0, microsecond=0)
+            market_end = now.replace(hour=15, minute=15, second=0, microsecond=0)
             
-        # 2. Market Hours Check (9:15 AM to 3:15 PM)
-        market_start = now.replace(hour=9, minute=15, second=0, microsecond=0)
-        market_end = now.replace(hour=15, minute=15, second=0, microsecond=0)
-        
-        if now < market_start or now > market_end:
-            logger.info(f"Market is closed (Time: {now.strftime('%I:%M %p')}). Skipping trading cycle to save API keys.")
-            return
+            if now < market_start or now > market_end:
+                logger.info(f"Market is closed (Time: {now.strftime('%I:%M %p')}). Skipping trading cycle to save API keys.")
+                return
             
         self.is_running_cycle = True
         db = SessionLocal()
@@ -116,7 +117,7 @@ class TradingScheduler:
             symbols = WATCHLIST
             
             for symbol in symbols:
-                # Cooldown check: Skip stocks analyzed in the last 5 minutes
+                # Cooldown check: Skip stocks analyzed in the last 15 minutes unless ignore_hours is set
                 from datetime import datetime, timedelta
                 five_mins_ago = datetime.utcnow() - timedelta(minutes=15)
                 recent_scan = db.query(AIResponse).filter(
@@ -124,8 +125,8 @@ class TradingScheduler:
                     AIResponse.created_at >= five_mins_ago
                 ).first()
                 
-                if recent_scan:
-                    logger.info(f"Skipping {symbol} scan - recently analyzed in the last 5 minutes.")
+                if not ignore_hours and recent_scan:
+                    logger.info(f"Skipping {symbol} scan - recently analyzed in the last 15 minutes.")
                     continue
                     
                 logger.info(f"Scanning {symbol}...")
@@ -147,7 +148,8 @@ class TradingScheduler:
                     "signal_type": "AUTOMATIC_SCAN",
                     "indicators": indicators,
                     "fundamentals": fundamentals,
-                    "derivatives_oi": oi_metrics
+                    "derivatives_oi": oi_metrics,
+                    "ignore_hours": ignore_hours
                 }
                 
                 # Dynamic news fetch if enabled in system rules

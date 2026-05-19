@@ -183,10 +183,11 @@ async def execute_all_agents(
 
         tasks = []
         agent_names = []
+        ignore_hours = opportunity.get("ignore_hours", False)
         for agent in agents:
-            # OPTIMIZATION: If this model has already executed 2 or more trades for this stock today,
+            # OPTIMIZATION: If this model has already executed maximum trades for this stock today,
             # skip the LLM API call entirely to save API credits and request limits!
-            from database.models import Trade
+            from database.models import Trade, SystemRule
             from datetime import date
             today_start = datetime.combine(date.today(), datetime.min.time())
             
@@ -196,7 +197,10 @@ async def execute_all_agents(
                 Trade.entry_time >= today_start
             ).count()
             
-            if stock_trades_today >= 2:
+            rule = db.query(SystemRule).filter(SystemRule.key == "max_trades_per_stock_daily").first()
+            max_stock_trades = int(rule.numeric_value) if rule else 5
+            
+            if not ignore_hours and stock_trades_today >= max_stock_trades:
                 logger.info(f"Skipping LLM API query for {agent.name} on {opportunity.get('symbol')} - already traded {stock_trades_today} today.")
                 continue
 
@@ -215,6 +219,7 @@ async def execute_all_agents(
             decision = result if not isinstance(result, Exception) else {"decision": "HOLD", "reasoning": str(result)}
             decision["agent_id"] = agent_id
             decision["agent"] = agent_name
+            decision["ignore_hours"] = ignore_hours
 
 
             # Save AI response
