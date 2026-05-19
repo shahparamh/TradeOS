@@ -23,9 +23,15 @@ export const AuthProvider = ({ children }) => {
                 setIsAuthenticated(true);
             } catch (error) {
                 console.error("Token verification failed", error);
-                localStorage.removeItem('tradeos_token');
-                setUser(null);
-                setIsAuthenticated(false);
+                // Clear token ONLY if the server explicitly rejected it with an unauthorized status
+                if (error.response && (error.response.status === 401 || error.response.status === 403)) {
+                    localStorage.removeItem('tradeos_token');
+                    setUser(null);
+                    setIsAuthenticated(false);
+                } else if (!error.response) {
+                    // It's a network/server connection issue
+                    toast.error("Unable to connect to the TradeOS server. Please ensure the backend is running.", { id: 'conn-error' });
+                }
             } finally {
                 setIsLoading(false);
             }
@@ -48,7 +54,14 @@ export const AuthProvider = ({ children }) => {
             toast.success(`Welcome back, ${userProfile.data.username}!`);
             return true;
         } catch (error) {
-            const message = error.response?.data?.detail || "Invalid credentials. Please try again.";
+            let message = "An unexpected error occurred. Please try again.";
+            if (error.response) {
+                message = error.response.data?.detail || "Invalid credentials. Please try again.";
+            } else if (error.request) {
+                message = "Cannot connect to the TradeOS server. Please check if the backend is running.";
+            } else {
+                message = error.message;
+            }
             toast.error(message);
             return false;
         } finally {
@@ -64,7 +77,14 @@ export const AuthProvider = ({ children }) => {
             // Auto login after registration
             return await login(username, password);
         } catch (error) {
-            const message = error.response?.data?.detail || "Registration failed. Username or email may already be in use.";
+            let message = "Registration failed. Please try again.";
+            if (error.response) {
+                message = error.response.data?.detail || "Registration failed. Username or email may already be in use.";
+            } else if (error.request) {
+                message = "Cannot connect to the TradeOS server. Please check if the backend is running.";
+            } else {
+                message = error.message;
+            }
             toast.error(message);
             return false;
         } finally {
