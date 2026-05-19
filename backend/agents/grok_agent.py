@@ -20,11 +20,25 @@ async def query_grok(payload: str) -> dict:
     Sends market data payload to Grok and returns a parsed trading decision.
     Uses the OpenAI-compatible chat completions endpoint.
     """
+    api_key = settings.XAI_API_KEY
+    if not api_key or not api_key.strip():
+        logger.error("Grok API Key is missing in settings!")
+        return {
+            "agent": "Grok",
+            "provider": "xai",
+            "decision": "HOLD",
+            "confidence": 0,
+            "reasoning": "Grok API Key not provided. Please add XAI_API_KEY in your backend/.env file.",
+            "is_valid": False,
+            "latency_ms": 0,
+            "raw_response": "Missing API Key"
+        }
+
     start_time = time.time()
 
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {settings.XAI_API_KEY}",
+        "Authorization": f"Bearer {api_key.strip()}",
     }
 
     body = {

@@ -11,10 +11,18 @@ async def query_openrouter_free(payload: dict, system_prompt: str = None) -> dic
     Queries 100% free models on OpenRouter (e.g. Qwen 2.5 72B) 
     with highly generous rate limits.
     """
-    api_key = getattr(settings, "OPENROUTER_API_KEY", "sk-or-v1-mock")
+    api_key = getattr(settings, "OPENROUTER_API_KEY", "")
+    if not api_key or not api_key.strip():
+        logger.error("OpenRouter API Key is missing in settings!")
+        return {
+            "agent": "Qwen-Free",
+            "provider": "openrouter",
+            "decision": "HOLD",
+            "reasoning": "OpenRouter API Key not provided. Please add OPENROUTER_API_KEY in your backend/.env file."
+        }
     
     headers = {
-        "Authorization": f"Bearer {api_key}",
+        "Authorization": f"Bearer {api_key.strip()}",
         "Content-Type": "application/json",
         "HTTP-Referer": "https://tradeos.io", # Required by OpenRouter
         "X-Title": "TradeOS Platform"

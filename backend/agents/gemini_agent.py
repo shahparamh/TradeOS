@@ -20,9 +20,22 @@ async def query_gemini(payload: str, system_prompt: str = SYSTEM_PROMPT) -> dict
     Uses stateful API key rotation to bypass rate limits gracefully.
     """
     global _current_key_index
-    keys = settings.GEMINI_API_KEYS
+    keys = [k.strip() for k in settings.GEMINI_API_KEYS if k and k.strip()]
     if not keys:
-        keys = [settings.GEMINI_API_KEY]
+        keys = [k.strip() for k in [settings.GEMINI_API_KEY] if k and k.strip()]
+        
+    if not keys:
+        logger.error("No valid Gemini API Keys found!")
+        return {
+            "agent": "Gemini",
+            "provider": "google",
+            "decision": "HOLD",
+            "confidence": 0,
+            "reasoning": "Gemini API Key not provided. Please add GEMINI_API_KEY in your backend/.env file.",
+            "is_valid": False,
+            "latency_ms": 0,
+            "raw_response": "Missing API Keys",
+        }
         
     start_time = time.time()
     num_keys = len(keys)

@@ -24,9 +24,22 @@ async def query_groq(payload: str, system_prompt: str = SYSTEM_PROMPT) -> dict:
     Uses stateful API key rotation to bypass rate limits gracefully.
     """
     global _current_key_index
-    keys = settings.GROQ_API_KEYS
+    keys = [k.strip() for k in settings.GROQ_API_KEYS if k and k.strip()]
     if not keys:
-        keys = [settings.GROQ_API_KEY]
+        keys = [k.strip() for k in [settings.GROQ_API_KEY] if k and k.strip()]
+        
+    if not keys:
+        logger.error("No valid Groq API Keys found!")
+        return {
+            "agent": "Groq-Llama",
+            "provider": "groq",
+            "decision": "HOLD",
+            "confidence": 0,
+            "reasoning": "Groq API Key not provided. Please add GROQ_API_KEY in your backend/.env file.",
+            "is_valid": False,
+            "latency_ms": 0,
+            "raw_response": "Missing API Keys",
+        }
         
     start_time = time.time()
     num_keys = len(keys)
