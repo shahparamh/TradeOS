@@ -93,6 +93,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/")
+def root():
+    return {
+        "status": "alive",
+        "platform": "TradeOS",
+        "message": "TradeOS API is running successfully.",
+        "documentation": "/docs",
+        "health_check": "/api/health"
+    }
+
 # Health check
 @app.get("/api/health")
 def health_check():
