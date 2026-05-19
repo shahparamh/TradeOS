@@ -63,22 +63,35 @@ class PositionMonitor:
         
         # 1. Intraday Square-off (3:15 PM IST)
         if position.trade_type == "INTRADAY":
-            if (now.hour == 15 and now.minute >= 15) or now.hour > 15:
-                return "SQUARED_OFF"
+            # Only trigger intraday square-off if the position was opened before 3:15 PM
+            # and current time is past 3:15 PM. This allows testing positions created during off-hours.
+            if position.opened_at:
+                import pytz
+                from utils.helpers import IST
+                opened_at_utc = pytz.utc.localize(position.opened_at) if position.opened_at.tzinfo is None else position.opened_at.astimezone(pytz.utc)
+                opened_at_ist = opened_at_utc.astimezone(IST)
+                opened_after_cutoff = opened_at_ist.hour > 15 or (opened_at_ist.hour == 15 and opened_at_ist.minute >= 15)
+                is_today = opened_at_ist.date() == now.date()
+                if (now.hour == 15 and now.minute >= 15) or now.hour > 15:
+                    if not (is_today and opened_after_cutoff):
+                        return "SQUARED_OFF"
+            else:
+                if (now.hour == 15 and now.minute >= 15) or now.hour > 15:
+                    return "SQUARED_OFF"
 
         # 2. Bullish positions (LONG, BUY_CE, SELL_PE)
         is_bullish = position.position_type in ["LONG", "BUY_CE", "SELL_PE"]
         
         if is_bullish:
-            if current_price >= position.target_price:
+            if position.target_price > 0 and current_price >= position.target_price:
                 return "TARGET_HIT"
-            if current_price <= position.stop_loss:
+            if position.stop_loss > 0 and current_price <= position.stop_loss:
                 return "SL_HIT"
         # 3. Bearish positions (SHORT, BUY_PE, SELL_CE)
         else:
-            if current_price <= position.target_price:
+            if position.target_price > 0 and current_price <= position.target_price:
                 return "TARGET_HIT"
-            if current_price >= position.stop_loss:
+            if position.stop_loss > 0 and current_price >= position.stop_loss:
                 return "SL_HIT"
 
         return None

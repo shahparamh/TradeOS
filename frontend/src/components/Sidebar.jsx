@@ -7,7 +7,8 @@ import {
     TrendingUp, 
     Users, 
     Settings,
-    Zap
+    Zap,
+    Terminal
 } from 'lucide-react';
 
 import { useAuth } from '../context/AuthContext';
@@ -18,6 +19,7 @@ const Sidebar = () => {
     const navItems = [
         { name: 'Dashboard', icon: <LayoutDashboard size={20} />, path: '/' },
         { name: 'Pre-Market Strategy', icon: <Zap size={20} />, path: '/pre-market' },
+        { name: 'Manual Trading', icon: <Terminal size={20} />, path: '/manual-trading' },
         { name: 'Live Positions', icon: <Briefcase size={20} />, path: '/positions' },
         { name: 'Trade History', icon: <History size={20} />, path: '/history' },
         { name: 'AI Agents', icon: <Users size={20} />, path: '/agents' },

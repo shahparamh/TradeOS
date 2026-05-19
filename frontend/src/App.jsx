@@ -11,6 +11,7 @@ import Settings from './pages/Settings';
 import AgentDetail from './pages/AgentDetail';
 import Login from './pages/Login';
 import PreMarket from './pages/PreMarket';
+import ManualTrading from './pages/ManualTrading';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import './App.css';
 
@@ -37,6 +38,7 @@ function AppContent() {
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/pre-market" element={<PreMarket />} />
+          <Route path="/manual-trading" element={<ManualTrading />} />
           <Route path="/positions" element={<Positions />} />
           <Route path="/history" element={<History />} />
           <Route path="/agents" element={<Agents />} />
