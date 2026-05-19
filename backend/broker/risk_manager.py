@@ -46,6 +46,7 @@ class RiskManager:
             self._check_position_limit(agent_state),
             self._check_intraday_trade_limit(decision, agent_state),
             self._check_duplicate_position(decision, agent_state),
+            self._check_per_stock_daily_limit(decision, agent_state),
             self._check_stop_loss_distance(decision),
             self._check_risk_reward_ratio(decision),
             self._check_capital_limit(decision, agent_state), # Last, as it may adjust quantity
@@ -229,3 +230,33 @@ class RiskManager:
                 "reason": f"PROFIT_THRESHOLD_REJECTED: Proposed profit margin ({profit_pct:.2%}) is below the required threshold of {min_profit_pct:.2%}. (Target: ₹{target}, Entry: ₹{entry})"
             }
         return {"passed": True}
+
+    def _check_per_stock_daily_limit(self, decision: dict, agent_state: dict) -> dict:
+        symbol = decision.get("symbol")
+        agent_id = decision.get("agent_id")
+        if not symbol or not agent_id:
+            return {"passed": True}
+
+        from database.connection import SessionLocal
+        from database.models import Trade
+        from datetime import datetime, date
+
+        db = SessionLocal()
+        try:
+            today_start = datetime.combine(date.today(), datetime.min.time())
+            
+            # Count the number of trades (open or closed) entered today for this specific stock by this agent
+            trades_today = db.query(Trade).filter(
+                Trade.agent_id == agent_id,
+                Trade.symbol == symbol,
+                Trade.entry_time >= today_start
+            ).count()
+
+            if trades_today >= 2:
+                return {
+                    "passed": False,
+                    "reason": f"PER_STOCK_LIMIT_EXCEEDED: Agent has already traded {symbol} {trades_today} times today. Maximum allowed is 2 trades per stock per model per day."
+                }
+            return {"passed": True}
+        finally:
+            db.close()

@@ -14,7 +14,6 @@ from database.models import Agent, AIResponse
 from utils.logger import setup_logger
 
 from agents.openrouter_agent import query_openrouter_free
-from agents.deepseek_agent import query_deepseek
 from agents.ollama_agent import query_ollama
 
 logger = setup_logger("agent_executor")
@@ -83,6 +82,22 @@ async def execute_all_agents(
         tasks = []
         agent_names = []
         for agent in agents:
+            # OPTIMIZATION: If this model has already executed 2 or more trades for this stock today,
+            # skip the LLM API call entirely to save API credits and request limits!
+            from database.models import Trade
+            from datetime import date
+            today_start = datetime.combine(date.today(), datetime.min.time())
+            
+            stock_trades_today = db.query(Trade).filter(
+                Trade.agent_id == agent.id,
+                Trade.symbol == opportunity.get("symbol"),
+                Trade.entry_time >= today_start
+            ).count()
+            
+            if stock_trades_today >= 2:
+                logger.info(f"Skipping LLM API query for {agent.name} on {opportunity.get('symbol')} - already traded {stock_trades_today} times today.")
+                continue
+
             payload = build_ai_payload(market_context, opportunity, news, agent_states[agent.name])
             if agent.provider == "google":
                 tasks.append(query_gemini(payload))
@@ -93,10 +108,12 @@ async def execute_all_agents(
             elif agent.provider == "openrouter":
                 tasks.append(query_openrouter_free(payload))
                 agent_names.append((agent.name, agent.id, payload))
-            elif agent.provider == "deepseek":
-                tasks.append(query_deepseek(payload))
-                agent_names.append((agent.name, agent.id, payload))
             elif agent.provider == "ollama":
+                # Ollama runs only locally. Render cloud is restricted.
+                import os
+                if os.getenv("RENDER"):
+                    logger.info("Skipping local Ollama agent execution in cloud production.")
+                    continue
                 tasks.append(query_ollama(payload))
                 agent_names.append((agent.name, agent.id, payload))
 

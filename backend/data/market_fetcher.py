@@ -55,12 +55,19 @@ def fetch_index_data() -> dict:
     try:
         nifty = yf.Ticker("^NSEI").fast_info
         sensex = yf.Ticker("^BSESN").fast_info
-        vix = yf.Ticker("^INDIAVIX").fast_info
+        
+        vix_val = 14.5 # Standard defensive default
+        try:
+            vix = yf.Ticker("^INDIAVIX").fast_info
+            raw_vix = vix.last_price
+            if raw_vix is not None and not pd.isna(raw_vix) and raw_vix > 0:
+                vix_val = raw_vix
+        except Exception:
+            pass
         
         n_change = ((nifty.last_price - nifty.previous_close) / nifty.previous_close) * 100
         s_change = ((sensex.last_price - sensex.previous_close) / sensex.previous_close) * 100
         
-        vix_val = vix.last_price
         vix_status = "low" if vix_val < 15 else "moderate" if vix_val <= 20 else "high"
         
         return [
@@ -79,13 +86,14 @@ def fetch_index_data() -> dict:
             {
                 "symbol": "India VIX",
                 "price": round(vix_val, 2),
-                "change": 0, # VIX is often viewed differently
-                "percent_change": 0
+                "change": 0,
+                "percent_change": 0,
+                "status": vix_status
             }
         ]
     except Exception as e:
         logger.error(f"Error fetching index data: {str(e)}")
-        return {}
+        return []
  
 def fetch_bulk_prices(symbols: list) -> dict:
     try:
@@ -113,3 +121,47 @@ def fetch_bulk_prices(symbols: list) -> dict:
     except Exception as e:
         logger.error(f"Error fetching bulk prices: {str(e)}")
         return {}
+
+def fetch_option_oi_metrics(symbol: str) -> dict:
+    """Fetches option chain Open Interest from the nearest monthly expiry to compute Put-Call Ratio (PCR)."""
+    try:
+        ticker = yf.Ticker(symbol)
+        expiries = ticker.options
+        if not expiries:
+            return {"oi_pcr": 1.0, "total_call_oi": 0, "total_put_oi": 0, "oi_sentiment": "NEUTRAL"}
+            
+        # Target the nearest expiry (usually represents 90% of open interest)
+        opt = ticker.option_chain(expiries[0])
+        calls = opt.calls
+        puts = opt.puts
+        
+        # Guard against empty options tables
+        total_call_oi = int(calls["openInterest"].fillna(0).sum()) if "openInterest" in calls.columns else 0
+        total_put_oi = int(puts["openInterest"].fillna(0).sum()) if "openInterest" in puts.columns else 0
+        
+        if total_call_oi > 0:
+            oi_pcr = round(total_put_oi / total_call_oi, 2)
+        else:
+            oi_pcr = 1.0
+            
+        if oi_pcr >= 1.15:
+            sentiment = "BULLISH"
+        elif oi_pcr <= 0.75:
+            sentiment = "BEARISH"
+        else:
+            sentiment = "NEUTRAL"
+            
+        return {
+            "oi_pcr": oi_pcr,
+            "total_call_oi": total_call_oi,
+            "total_put_oi": total_put_oi,
+            "oi_sentiment": sentiment
+        }
+    except Exception as e:
+        logger.warning(f"Option OI chain fetch bypassed or not available for {symbol}: {e}")
+        return {
+            "oi_pcr": 1.0,
+            "total_call_oi": 0,
+            "total_put_oi": 0,
+            "oi_sentiment": "NEUTRAL"
+        }

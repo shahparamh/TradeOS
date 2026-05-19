@@ -69,144 +69,13 @@ def seed_db():
 
 seed_db()
 
-import base64
-import struct
-import json
-from fastapi import WebSocket, WebSocketDisconnect
-from utils.constants import WATCHLIST
-
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: list[WebSocket] = []
-
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
-
-    async def broadcast(self, message: dict):
-        for connection in self.active_connections:
-            try:
-                await connection.send_json(message)
-            except Exception:
-                pass
-
-manager = ConnectionManager()
-
-def decode_yahoo_protobuf(base64_str: str) -> dict:
-    try:
-        data = base64.b64decode(base64_str)
-        i = 0
-        limit = len(data)
-        result = {}
-        
-        while i < limit:
-            key = data[i]
-            tag = key >> 3
-            wire_type = key & 0x07
-            i += 1
-            
-            if wire_type == 0:  # Varint
-                val = 0
-                shift = 0
-                while True:
-                    b = data[i]
-                    val |= (b & 0x7F) << shift
-                    i += 1
-                    if not (b & 0x80):
-                        break
-                    shift += 7
-                if tag == 3:  # Time
-                    result["time"] = val
-                elif tag == 9:  # Volume
-                    result["volume"] = val
-            elif wire_type == 1:  # 64-bit
-                i += 8
-            elif wire_type == 2:  # Length-delimited
-                length = 0
-                shift = 0
-                while True:
-                    b = data[i]
-                    length |= (b & 0x7F) << shift
-                    i += 1
-                    if not (b & 0x80):
-                        break
-                    shift += 7
-                val_bytes = data[i:i+length]
-                i += length
-                if tag == 1:  # Ticker
-                    result["symbol"] = val_bytes.decode('utf-8', errors='ignore')
-                elif tag == 4:  # Currency
-                    result["currency"] = val_bytes.decode('utf-8', errors='ignore')
-                elif tag == 5:  # Exchange
-                    result["exchange"] = val_bytes.decode('utf-8', errors='ignore')
-            elif wire_type == 5:  # 32-bit float
-                val = struct.unpack('<f', data[i:i+4])[0]
-                i += 4
-                if tag == 2:  # Price
-                    result["price"] = val
-                elif tag == 8:  # Change Percent
-                    result["change_pct"] = val
-                elif tag == 12:  # Change
-                    result["change"] = val
-            else:
-                break
-        return result
-    except Exception:
-        return {}
-
-async def start_yahoo_websocket_stream():
-    """
-    Connects to Yahoo Finance WebSocket Streamer and broadcasts decoded ticks in real-time.
-    """
-    import websockets
-    subscription_payload = {
-        "subscribe": list(WATCHLIST)
-    }
-    
-    while True:
-        try:
-            print("[WebSocket Streamer] Connecting to wss://streamer.finance.yahoo.com...")
-            async with websockets.connect("wss://streamer.finance.yahoo.com") as ws:
-                await ws.send(json.dumps(subscription_payload))
-                print("[WebSocket Streamer] Subscribed to watchlist stocks successfully!")
-                
-                async for message in ws:
-                    decoded = decode_yahoo_protobuf(message)
-                    if decoded and "symbol" in decoded:
-                        await manager.broadcast({
-                            "type": "MARKET_TICK",
-                            "data": {
-                                "symbol": decoded["symbol"],
-                                "price": decoded.get("price"),
-                                "change_pct": decoded.get("change_pct"),
-                                "change": decoded.get("change"),
-                                "volume": decoded.get("volume"),
-                                "time": decoded.get("time")
-                            }
-                        })
-        except asyncio.CancelledError:
-            print("[WebSocket Streamer] Background task cancelled.")
-            break
-        except Exception as e:
-            print(f"[WebSocket Streamer] Connection error: {e}. Reconnecting in 5 seconds...")
-            await asyncio.sleep(5)
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: Start the scheduler
     trading_scheduler.start()
-    
-    # Startup: Start the continuous live Yahoo Finance WebSocket streamer
-    stream_task = asyncio.create_task(start_yahoo_websocket_stream())
-    
     yield
-    
-    # Shutdown: Stop the scheduler and cancel stream
+    # Shutdown: Stop the scheduler
     trading_scheduler.scheduler.shutdown()
-    stream_task.cancel()
 
 app = FastAPI(
     title="TradeOS API",
@@ -214,15 +83,6 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
-
-@app.websocket("/api/ws/market")
-async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
-    try:
-        while True:
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
 
 # CORS for React frontend
 app.add_middleware(
@@ -232,16 +92,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-@app.get("/")
-def root():
-    return {
-        "status": "alive",
-        "platform": "TradeOS",
-        "message": "TradeOS API is running successfully.",
-        "documentation": "/docs",
-        "health_check": "/api/health"
-    }
 
 # Health check
 @app.get("/api/health")

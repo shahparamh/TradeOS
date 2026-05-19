@@ -6,6 +6,7 @@ const CandlestickChart = ({
     markers = [], 
     height = 500, 
     liveTick = null,
+    timeframe = '5d',
     entryPrice = null,
     targetPrice = null,
     stopLoss = null
@@ -13,6 +14,12 @@ const CandlestickChart = ({
     const chartContainerRef = useRef(null);
     const chartRef = useRef(null);
     const seriesRef = useRef(null);
+    const activeBarRef = useRef(null);
+
+    // Reset live bar tracker when historical timeframe data changes
+    useEffect(() => {
+        activeBarRef.current = null;
+    }, [data]);
 
     useEffect(() => {
         if (!chartContainerRef.current) return;
@@ -107,22 +114,51 @@ const CandlestickChart = ({
         };
     }, [data, markers, height, entryPrice, targetPrice, stopLoss]);
 
-    // Handle incoming continuous live price ticks
+    // Handle incoming continuous live price ticks (updating the active bar with high frequency)
     useEffect(() => {
         if (seriesRef.current && liveTick) {
             const timeVal = liveTick.time 
                 ? (String(liveTick.time).length > 10 ? Math.floor(liveTick.time / 1000) : liveTick.time)
                 : Math.floor(Date.now() / 1000);
             
-            seriesRef.current.update({
-                time: timeVal,
-                open: liveTick.open || liveTick.price,
-                high: liveTick.high || liveTick.price,
-                low: liveTick.low || liveTick.price,
-                close: liveTick.price
-            });
+            // Map timeframe string to seconds
+            let roundSeconds = 300; // default 5 minutes
+            if (timeframe === '1m') roundSeconds = 3600; // 1 hour
+            else if (timeframe === '1y' || timeframe === '5y') roundSeconds = 86400; // 1 day
+            
+            const alignedTime = Math.floor(timeVal / roundSeconds) * roundSeconds;
+            const price = Number(liveTick.price);
+
+            if (!activeBarRef.current || activeBarRef.current.time !== alignedTime) {
+                // Initialize from the last candle in our data to avoid gaps
+                const lastCandle = data && data.length > 0 ? data[data.length - 1] : null;
+                if (lastCandle && lastCandle.time === alignedTime) {
+                    activeBarRef.current = {
+                        time: alignedTime,
+                        open: Number(lastCandle.open),
+                        high: Math.max(Number(lastCandle.high), price),
+                        low: Math.min(Number(lastCandle.low), price),
+                        close: price
+                    };
+                } else {
+                    activeBarRef.current = {
+                        time: alignedTime,
+                        open: price,
+                        high: price,
+                        low: price,
+                        close: price
+                    };
+                }
+            } else {
+                // Live sub-second updates to body and wicks
+                activeBarRef.current.close = price;
+                activeBarRef.current.high = Math.max(activeBarRef.current.high, price);
+                activeBarRef.current.low = Math.min(activeBarRef.current.low, price);
+            }
+            
+            seriesRef.current.update(activeBarRef.current);
         }
-    }, [liveTick]);
+    }, [liveTick, timeframe, data]);
 
     return <div ref={chartContainerRef} style={{ position: 'relative', width: '100%' }} />;
 };

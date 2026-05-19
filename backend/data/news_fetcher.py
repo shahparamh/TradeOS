@@ -91,21 +91,78 @@ def fetch_newsapi_headlines(query: str, max_results: int = 5) -> list:
     logger.error("All NewsAPI keys are exhausted or failed!")
     return []
 
+COMPANY_NAME_MAP = {
+    "HFCL.NS": "HFCL",
+    "INFY.NS": "Infosys",
+    "TECHM.NS": "Tech Mahindra",
+    "HCLTECH.NS": "HCL Technologies",
+    "BSE.NS": "BSE",
+}
+
+def fetch_moneycontrol_news(company_name: str, max_results: int = 5) -> list:
+    """Queries Moneycontrol articles specifically via Google RSS search to avoid fragile scraping."""
+    try:
+        encoded_query = quote(f"{company_name} site:moneycontrol.com")
+        url = f"https://news.google.com/rss/search?q={encoded_query}&hl=en-IN&gl=IN&ceid=IN:en"
+        feed = feedparser.parse(url)
+
+        articles = []
+        for entry in feed.entries[:max_results]:
+            # Remove " - Moneycontrol" suffix from title for cleaner LLM ingestion
+            clean_title = entry.title
+            if " - Moneycontrol" in clean_title:
+                clean_title = clean_title.split(" - Moneycontrol")[0]
+            elif " | Moneycontrol" in clean_title:
+                clean_title = clean_title.split(" | Moneycontrol")[0]
+
+            articles.append({
+                "headline": clean_title,
+                "source": "Moneycontrol",
+                "url": entry.link,
+                "sentiment": tag_sentiment(clean_title),
+                "published_at": entry.published if hasattr(entry, "published") else str(datetime.now()),
+                "query": company_name
+            })
+        return articles
+    except Exception as e:
+        logger.error(f"Error fetching Moneycontrol news for {company_name}: {e}")
+        return []
+
 def fetch_market_news() -> list:
     # Combine macro news
     macro_queries = ["Indian stock market", "RBI policy", "Nifty 50"]
     all_news = []
     
+    # 1. Fetch official Moneycontrol Market Outlook Feed
+    try:
+        feed = feedparser.parse("https://www.moneycontrol.com/rss/marketoutlook.xml")
+        for entry in feed.entries[:3]:
+            all_news.append({
+                "headline": entry.title,
+                "source": "Moneycontrol RSS",
+                "url": entry.link,
+                "sentiment": tag_sentiment(entry.title),
+                "published_at": entry.published if hasattr(entry, "published") else str(datetime.now()),
+                "query": "Market Outlook"
+            })
+    except Exception as e:
+        logger.error(f"Error reading Moneycontrol Market Outlook RSS: {e}")
+
+    # 2. Supplementary Google News queries
     for q in macro_queries:
-        all_news.extend(fetch_google_news(q, max_results=2))
+        all_news.extend(fetch_google_news(q, max_results=1))
         
     return all_news
 
 def fetch_all_news_for_stock(symbol: str) -> list:
-    company_name = symbol.replace(".NS", "").replace(".BO", "")
+    company_name = COMPANY_NAME_MAP.get(symbol, symbol.replace(".NS", "").replace(".BO", ""))
     
     news = []
-    news.extend(fetch_google_news(company_name, 3))
-    news.extend(fetch_newsapi_headlines(company_name, 2))
+    # 1. Prioritize real-time Moneycontrol coverage
+    news.extend(fetch_moneycontrol_news(company_name, 3))
+    # 2. Fallback to Google news
+    news.extend(fetch_google_news(company_name, 2))
+    # 3. API headlines
+    news.extend(fetch_newsapi_headlines(company_name, 1))
     
     return news

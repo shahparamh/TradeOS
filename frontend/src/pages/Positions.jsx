@@ -420,6 +420,7 @@ const Positions = () => {
                                 <CandlestickChart 
                                     data={chartData} 
                                     liveTick={liveTick} 
+                                    timeframe={timeframe}
                                     height={350} 
                                     entryPrice={selectedPosition?.entry_price}
                                     targetPrice={selectedPosition?.target_price}

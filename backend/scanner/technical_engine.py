@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 
 def calculate_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
-    if df.empty or len(df) < 50:
+    if df.empty or len(df) < 15:
         return df
 
     # We make a copy to avoid SettingWithCopyWarning
@@ -77,13 +77,29 @@ def generate_indicator_summary(df: pd.DataFrame, symbol: str) -> dict:
     # Get the latest row
     latest = df.iloc[-1].fillna(0) # Fill NaNs with 0 to avoid JSON serialization issues
 
+    def clean_float(val, default=0.0, decimals=2):
+        try:
+            import math
+            import numpy as np
+            if val is None:
+                return default
+            # Handle standard python float NaN/Inf
+            if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
+                return default
+            # Handle numpy float NaN/Inf
+            if isinstance(val, (np.floating, np.float64)) and (np.isnan(val) or np.isinf(val)):
+                return default
+            return round(float(val), decimals)
+        except Exception:
+            return default
+
+    close_price = clean_float(latest["Close"])
+    ema20 = clean_float(latest.get("ema_20", close_price))
+    ema50 = clean_float(latest.get("ema_50", close_price))
+
     macd_signal = "bullish" if latest.get("macd", 0) > latest.get("macd_signal", 0) else "bearish"
 
     # Determine trend
-    close_price = latest["Close"]
-    ema20 = latest.get("ema_20", 0)
-    ema50 = latest.get("ema_50", 0)
-
     if close_price > ema20 and ema20 > ema50:
         trend = "strong_bullish"
     elif close_price > ema20:
@@ -96,7 +112,7 @@ def generate_indicator_summary(df: pd.DataFrame, symbol: str) -> dict:
         trend = "sideways"
 
     # Volume Signal
-    vol_ratio = latest.get("volume_ratio", 1.0)
+    vol_ratio = clean_float(latest.get("volume_ratio", 1.0))
     if vol_ratio > 2.0:
         volume_signal = "spike"
     elif vol_ratio > 1.0:
@@ -105,8 +121,8 @@ def generate_indicator_summary(df: pd.DataFrame, symbol: str) -> dict:
         volume_signal = "low"
 
     # Bollinger Bands Position
-    bb_lower = latest.get("bb_lower", 0)
-    bb_upper = latest.get("bb_upper", 0)
+    bb_lower = clean_float(latest.get("bb_lower", 0))
+    bb_upper = clean_float(latest.get("bb_upper", 0))
     bb_range = bb_upper - bb_lower
     
     if bb_range > 0:
@@ -125,22 +141,22 @@ def generate_indicator_summary(df: pd.DataFrame, symbol: str) -> dict:
 
     return {
         "symbol": symbol,
-        "price": round(float(close_price), 2),
-        "rsi": round(float(latest.get("rsi", 50)), 1),
+        "price": close_price,
+        "rsi": clean_float(latest.get("rsi", 50.0), decimals=1),
         "macd": macd_signal,
-        "macd_histogram": round(float(latest.get("macd_histogram", 0)), 2),
-        "ema_20": round(float(ema20), 2),
-        "ema_50": round(float(ema50), 2),
+        "macd_histogram": clean_float(latest.get("macd_histogram", 0.0)),
+        "ema_20": ema20,
+        "ema_50": ema50,
         "price_vs_ema20": "above" if close_price > ema20 else "below",
         "price_vs_ema50": "above" if close_price > ema50 else "below",
-        "vwap": round(float(latest.get("vwap", close_price)), 2),
+        "vwap": clean_float(latest.get("vwap", close_price)),
         "price_vs_vwap": "above" if close_price > latest.get("vwap", close_price) else "below",
-        "volume_ratio": round(float(vol_ratio), 2),
+        "volume_ratio": vol_ratio,
         "volume_signal": volume_signal,
         "bb_position": bb_position,
-        "atr": round(float(latest.get("atr", close_price * 0.01)), 2),
-        "pivot": round(float(latest.get("pivot", close_price)), 2),
-        "support_1": round(float(latest.get("support_1", close_price)), 2),
-        "resistance_1": round(float(latest.get("resistance_1", close_price)), 2),
+        "atr": clean_float(latest.get("atr", close_price * 0.01)),
+        "pivot": clean_float(latest.get("pivot", close_price)),
+        "support_1": clean_float(latest.get("support_1", close_price)),
+        "resistance_1": clean_float(latest.get("resistance_1", close_price)),
         "trend": trend,
     }

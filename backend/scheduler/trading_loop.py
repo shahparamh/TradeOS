@@ -133,10 +133,21 @@ class TradingScheduler:
                 if candles_df.empty: continue
                 
                 indicators = generate_indicator_summary(calculate_all_indicators(candles_df), symbol)
+                
+                # Fetch stock-specific fundamental metrics (P/E, ROE, 52W High/Low, Sector)
+                from data.fundamentals_fetcher import fetch_yf_fundamentals
+                fundamentals = fetch_yf_fundamentals(symbol)
+                
+                # Fetch Derivatives Option Chain Open Interest (OI) & PCR (Put-Call Ratio)
+                from data.market_fetcher import fetch_option_oi_metrics
+                oi_metrics = fetch_option_oi_metrics(symbol)
+                
                 opportunity = {
                     "symbol": symbol,
                     "signal_type": "AUTOMATIC_SCAN",
-                    "indicators": indicators
+                    "indicators": indicators,
+                    "fundamentals": fundamentals,
+                    "derivatives_oi": oi_metrics
                 }
                 
                 # Dynamic news fetch if enabled in system rules
@@ -237,7 +248,6 @@ class TradingScheduler:
             from agents.gemini_agent import query_gemini
             from agents.groq_agent import query_groq
             from agents.openrouter_agent import query_openrouter_free
-            from agents.deepseek_agent import query_deepseek
             from agents.ollama_agent import query_ollama
             
             for symbol in symbols:
@@ -273,11 +283,11 @@ class TradingScheduler:
                             import json
                             payload_dict = json.loads(payload_str)
                             decision_data = await query_openrouter_free(payload_dict, system_prompt=PRE_MARKET_SYSTEM_PROMPT)
-                        elif agent.provider == "deepseek":
-                            import json
-                            payload_dict = json.loads(payload_str)
-                            decision_data = await query_deepseek(payload_dict, system_prompt=PRE_MARKET_SYSTEM_PROMPT)
                         elif agent.provider == "ollama":
+                            import os
+                            if os.getenv("RENDER"):
+                                logger.info("Skipping local Ollama pre-market setup in Render cloud.")
+                                continue
                             decision_data = await query_ollama(payload_str, system_prompt=PRE_MARKET_SYSTEM_PROMPT)
                     except Exception as ex:
                         logger.error(f"Error querying {agent.name} pre-market: {ex}")
