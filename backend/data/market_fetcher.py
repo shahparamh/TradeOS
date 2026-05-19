@@ -4,7 +4,20 @@ from utils.logger import setup_logger
 
 logger = setup_logger("market_fetcher")
 
+import time
+
+_live_price_cache = {}
+CACHE_TTL_SECONDS = 60
+
 def fetch_live_price(symbol: str) -> dict:
+    current_time = time.time()
+    
+    # Return from cache if fresh
+    if symbol in _live_price_cache:
+        cached_data, cached_time = _live_price_cache[symbol]
+        if current_time - cached_time < CACHE_TTL_SECONDS:
+            return cached_data
+
     try:
         ticker = yf.Ticker(symbol)
         info = ticker.fast_info
@@ -13,10 +26,17 @@ def fetch_live_price(symbol: str) -> dict:
         current_price = info.last_price
         prev_close = info.previous_close
         
+        # Guard against None values
+        if current_price is None or pd.isna(current_price) or current_price == 0:
+            if symbol in _live_price_cache:
+                # Return cached data on rate limit or empty response
+                return _live_price_cache[symbol][0]
+            raise ValueError(f"Received empty or zero price from yfinance for {symbol}")
+            
         change = round(current_price - prev_close, 2) if prev_close else 0
         change_pct = round(((current_price - prev_close) / prev_close) * 100, 2) if prev_close else 0
 
-        return {
+        res = {
             "symbol": symbol,
             "price": round(current_price, 2),
             "open": round(info.open, 2) if info.open else None,
@@ -28,8 +48,15 @@ def fetch_live_price(symbol: str) -> dict:
             "percent_change": change_pct,
             "change_pct": change_pct,  # keep backward compat
         }
+        
+        _live_price_cache[symbol] = (res, current_time)
+        return res
     except Exception as e:
         logger.error(f"Error fetching live price for {symbol}: {str(e)}")
+        # Dynamic fallback to cache if available
+        if symbol in _live_price_cache:
+            logger.info(f"Using stale cached price for {symbol} due to API error.")
+            return _live_price_cache[symbol][0]
         return {"symbol": symbol, "price": 0, "change": 0, "percent_change": 0}
 
 def fetch_intraday_candles(symbol: str, interval: str = "5m", period: str = "5d") -> pd.DataFrame:

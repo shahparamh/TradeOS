@@ -24,12 +24,24 @@ Base.metadata.create_all(bind=engine)
 def seed_db():
     db = SessionLocal()
     
+    # Purge existing openrouter agents and their dependencies
+    openrouter_agents = db.query(Agent).filter(Agent.provider == "openrouter").all()
+    if openrouter_agents:
+        from database.models import Trade, Position, DailyPerformance, AIResponse, AgentDailyStrategy
+        for agent in openrouter_agents:
+            db.query(Position).filter(Position.agent_id == agent.id).delete()
+            db.query(Trade).filter(Trade.agent_id == agent.id).delete()
+            db.query(DailyPerformance).filter(DailyPerformance.agent_id == agent.id).delete()
+            db.query(AIResponse).filter(AIResponse.agent_id == agent.id).delete()
+            db.query(AgentDailyStrategy).filter(AgentDailyStrategy.agent_id == agent.id).delete()
+            db.delete(agent)
+        db.commit()
+    
     # 1. Seed default agents
     existing_names = {a.name for a in db.query(Agent).all()}
     default_agents = [
         Agent(name="Gemini", model_name=settings.GEMINI_MODEL, provider="google", cash_balance=100000.0, total_pnl=0.0),
         Agent(name="Groq-Llama", model_name="llama-3.3-70b", provider="groq", cash_balance=100000.0, total_pnl=0.0),
-        Agent(name="Qwen-Free", model_name="qwen-2.5-72b", provider="openrouter", cash_balance=100000.0, total_pnl=0.0),
         Agent(name="DeepSeek-R1", model_name="deepseek-reasoning", provider="deepseek", cash_balance=100000.0, total_pnl=0.0),
         Agent(name="Local-Ollama", model_name="llama3.2", provider="ollama", cash_balance=100000.0, total_pnl=0.0)
     ]
@@ -55,15 +67,31 @@ def seed_db():
     # 3. Seed default trading rules
     from database.models import SystemRule
     rules_to_seed = [
-        ("enable_loss_lockout", "boolean", True, None, "Toggle single-stock daily loss lockout"),
-        ("enable_short_selling", "boolean", False, None, "Allow intraday short positions"),
-        ("min_profit_threshold_pct", "float", None, 0.015, "Minimum take profit percentage threshold (e.g., 0.015 for 1.5%)"),
-        ("enable_news_sentiment", "boolean", True, None, "Enable parsing of live RSS news sentiment inside trading loop")
+        ("enable_loss_lockout", "boolean", False, None, "Toggle single-stock daily loss lockout"),
+        ("enable_short_selling", "boolean", True, None, "Allow intraday short positions"),
+        ("min_profit_threshold_pct", "float", None, 0.005, "Minimum take profit percentage threshold (e.g., 0.015 for 1.5%)"),
+        ("enable_news_sentiment", "boolean", True, None, "Enable parsing of live RSS news sentiment inside trading loop"),
+        ("max_open_positions", "float", None, 40.0, "Maximum open positions per agent"),
+        ("max_capital_per_trade_pct", "float", None, 0.50, "Maximum capital per trade percentage (0.50 = 50%)"),
+        ("max_intraday_trades", "float", None, 70.0, "Maximum intraday trades per agent per day"),
+        ("daily_drawdown_limit", "float", None, -0.05, "Daily loss drawdown limit (e.g., -0.05 for -5%)"),
+        ("min_confidence", "float", None, 45.0, "Minimum model confidence floor to enter trade (0-100)"),
+        ("max_stop_loss_distance", "float", None, 0.07, "Maximum allowed stop loss distance (e.g. 0.07 for 7%)"),
+        ("min_risk_reward_ratio", "float", None, 1.0, "Minimum risk-reward ratio allowed"),
+        ("max_consecutive_losses", "float", None, 5.0, "Circuit breaker max consecutive daily losses"),
+        ("max_trades_per_stock_daily", "float", None, 5.0, "Maximum trades per stock per model per day"),
+        ("entry_start_hour", "float", None, 9.25, "Allowed entry start hour (e.g., 9.25 for 9:15 AM)"),
+        ("entry_end_hour", "float", None, 15.0, "Allowed entry end hour (e.g., 15.0 for 3:00 PM)")
     ]
     for key, val_type, b_val, n_val, desc in rules_to_seed:
         existing = db.query(SystemRule).filter(SystemRule.key == key).first()
         if not existing:
             db.add(SystemRule(key=key, value_type=val_type, bool_value=b_val, numeric_value=n_val, description=desc))
+        else:
+            existing.value_type = val_type
+            existing.bool_value = b_val
+            existing.numeric_value = n_val
+            existing.description = desc
             
     db.commit()
     db.close()

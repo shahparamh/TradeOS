@@ -247,7 +247,6 @@ class TradingScheduler:
             # Importing agent clients dynamically to avoid circular references
             from agents.gemini_agent import query_gemini
             from agents.groq_agent import query_groq
-            from agents.openrouter_agent import query_openrouter_free
             from agents.ollama_agent import query_ollama
             
             for symbol in symbols:
@@ -279,10 +278,7 @@ class TradingScheduler:
                             decision_data = await query_gemini(payload_str, system_prompt=PRE_MARKET_SYSTEM_PROMPT)
                         elif agent.provider == "groq":
                             decision_data = await query_groq(payload_str, system_prompt=PRE_MARKET_SYSTEM_PROMPT)
-                        elif agent.provider == "openrouter":
-                            import json
-                            payload_dict = json.loads(payload_str)
-                            decision_data = await query_openrouter_free(payload_dict, system_prompt=PRE_MARKET_SYSTEM_PROMPT)
+
                         elif agent.provider == "ollama":
                             import os
                             if os.getenv("RENDER"):

@@ -27,7 +27,7 @@ BACKEND_DIR="$BASE_DIR/backend"
 FRONTEND_DIR="$BASE_DIR/frontend"
 
 # --- Pre-flight Checks ---
-echo -e "${CYAN}[1/3]${NC} Running pre-flight folder checks..."
+echo -e "${CYAN}[1/4]${NC} Running pre-flight folder checks..."
 
 if [ ! -d "$BACKEND_DIR" ]; then
     echo -e "${RED}❌ Error: Backend directory not found at $BACKEND_DIR${NC}"
@@ -40,14 +40,66 @@ if [ ! -d "$FRONTEND_DIR" ]; then
 fi
 echo -e "${GREEN}✓ Folders verified.${NC}"
 
-# Verify virtual environment
-if [ ! -f "$BACKEND_DIR/venv/bin/activate" ]; then
-    echo -e "${YELLOW}⚠️ Warning: Virtual environment (venv) not found in $BACKEND_DIR/venv${NC}"
-    echo -e "We will attempt to run using system python3, but creating a venv is recommended."
+# Check for Python 3
+if ! command -v python3 &> /dev/null; then
+    echo -e "${RED}❌ Error: python3 is not installed or not in PATH.${NC}"
+    exit 1
+fi
+
+# Check for Node and NPM
+if ! command -v npm &> /dev/null; then
+    echo -e "${RED}❌ Error: npm is not installed or not in PATH.${NC}"
+    exit 1
+fi
+
+# --- Environment Auto-Setup ---
+echo -e "\n${CYAN}[2/4]${NC} Checking virtual environment and dependencies..."
+
+# Automatically create Python virtual environment if missing
+if [ ! -d "$BACKEND_DIR/venv" ]; then
+    echo -e "${YELLOW}⚙️ Virtual environment (venv) not found at $BACKEND_DIR/venv.${NC}"
+    echo -e "${CYAN}Creating virtual environment...${NC}"
+    python3 -m venv "$BACKEND_DIR/venv"
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}❌ Error: Failed to create virtual environment.${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}✓ Virtual environment created successfully.${NC}"
+fi
+
+# Activate venv and install dependencies if requirements.txt exists
+if [ -f "$BACKEND_DIR/venv/bin/activate" ]; then
+    source "$BACKEND_DIR/venv/bin/activate"
+    echo -e "${CYAN}Verifying backend dependencies...${NC}"
+    pip install -r "$BACKEND_DIR/requirements.txt"
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}❌ Error: Failed to install backend dependencies.${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}✓ Backend dependencies verified.${NC}"
+    deactivate
+else
+    echo -e "${RED}❌ Error: Could not find virtual environment activation script.${NC}"
+    exit 1
+fi
+
+# Automatically install Node dependencies if node_modules is missing
+if [ ! -d "$FRONTEND_DIR/node_modules" ]; then
+    echo -e "${YELLOW}⚙️ frontend/node_modules not found. Installing node dependencies...${NC}"
+    cd "$FRONTEND_DIR"
+    npm install
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}❌ Error: Failed to install frontend dependencies.${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}✓ Frontend dependencies installed successfully.${NC}"
+    cd "$BASE_DIR"
+else
+    echo -e "${GREEN}✓ Frontend dependencies verified.${NC}"
 fi
 
 # Determine how to launch based on OS (MacOS supports launching separate terminal windows)
-echo -e "\n${CYAN}[2/3]${NC} Select launch mode:"
+echo -e "\n${CYAN}[3/4]${NC} Select launch mode:"
 echo -e "  ${BOLD}1)${NC} ${GREEN}Separate Windows (Recommended for Mac)${NC} — Opens Backend and Frontend in separate live Terminal windows."
 echo -e "  ${BOLD}2)${NC} ${CYAN}Background Mode${NC} — Runs both in the background and streams consolidated logs here."
 echo ""
@@ -70,7 +122,7 @@ if [ "$choice" == "1" ]; then
     echo -e "\n${GREEN}🚀 Launching in separate Terminal windows...${NC}"
     
     # Launch Backend
-    osascript -e 'tell application "Terminal" to do script "cd '"$BACKEND_DIR"' && echo \"--- Starting TradeOS Backend ---\" && source venv/bin/activate && python3 main.py"'
+    osascript -e 'tell application "Terminal" to do script "cd '"$BACKEND_DIR"' && echo \"--- Starting TradeOS Backend ---\" && source venv/bin/activate && python main.py"'
     
     # Wait a second to prevent race conditions
     sleep 1.5
@@ -78,10 +130,9 @@ if [ "$choice" == "1" ]; then
     # Launch Frontend
     osascript -e 'tell application "Terminal" to do script "cd '"$FRONTEND_DIR"' && echo \"--- Starting TradeOS Frontend ---\" && npm run dev"'
 
-    
     echo -e "\n${GREEN}✓ Both windows opened successfully!${NC}"
     echo -e "  👉 Backend running on: ${BOLD}http://localhost:8000${NC}"
-    echo -e "  👉 Frontend running on: ${BOLD}http://localhost:5174${NC}"
+    echo -e "  👉 Frontend running on: ${BOLD}http://localhost:5173${NC} (or http://localhost:5174)"
     echo -e "  You can close this window now."
     exit 0
 
@@ -97,7 +148,7 @@ else
     if [ -f "venv/bin/activate" ]; then
         source venv/bin/activate
     fi
-    python3 main.py > backend.log 2>&1 &
+    python main.py > backend.log 2>&1 &
     BACKEND_PID=$!
     
     # Start Frontend
@@ -108,7 +159,7 @@ else
     
     echo -e "\n${GREEN}✓ Both services started successfully!${NC}"
     echo -e "  👉 Backend PID: $BACKEND_PID (http://localhost:8000)"
-    echo -e "  👉 Frontend PID: $FRONTEND_PID (http://localhost:5174)"
+    echo -e "  👉 Frontend PID: $FRONTEND_PID (http://localhost:5173)"
     echo -e "  ${YELLOW}Tailing logs below. Press Ctrl+C to terminate both servers.${NC}"
     echo -e "======================================================================\n"
     

@@ -23,10 +23,21 @@ const Settings = () => {
     });
 
     const [rules, setRules] = useState({
-        enable_loss_lockout: true,
-        enable_short_selling: false,
-        min_profit_threshold_pct: 0.015,
-        enable_news_sentiment: true
+        enable_loss_lockout: false,
+        enable_short_selling: true,
+        min_profit_threshold_pct: 0.005,
+        enable_news_sentiment: true,
+        max_open_positions: 40,
+        max_capital_per_trade_pct: 0.50,
+        max_intraday_trades: 70,
+        daily_drawdown_limit: -0.05,
+        min_confidence: 45,
+        max_stop_loss_distance: 0.07,
+        min_risk_reward_ratio: 1.0,
+        max_consecutive_losses: 5,
+        max_trades_per_stock_daily: 5,
+        entry_start_hour: 9.25,
+        entry_end_hour: 15.0
     });
     
     const [loadingRules, setLoadingRules] = useState(true);
@@ -111,6 +122,126 @@ const Settings = () => {
                                     <button onClick={() => setRule('min_profit_threshold_pct', Math.min(0.05, rules.min_profit_threshold_pct + 0.005))}>+</button>
                                 </div>
                             </div>
+                            <div className="setting-row">
+                                <div>
+                                    <div className="sr-label">Max Open Positions</div>
+                                    <div className="sr-desc">Maximum simultaneous open positions per agent</div>
+                                </div>
+                                <div className="number-input">
+                                    <button onClick={() => setRule('max_open_positions', Math.max(1, (rules.max_open_positions || 0) - 1))}>-</button>
+                                    <span>{rules.max_open_positions || 0}</span>
+                                    <button onClick={() => setRule('max_open_positions', Math.min(100, (rules.max_open_positions || 0) + 1))}>+</button>
+                                </div>
+                            </div>
+                            <div className="setting-row">
+                                <div>
+                                    <div className="sr-label">Capital Per Trade Allocation</div>
+                                    <div className="sr-desc">Maximum cash allocation per trade as percentage of balance</div>
+                                </div>
+                                <div className="number-input">
+                                    <button onClick={() => setRule('max_capital_per_trade_pct', Math.max(0.05, (rules.max_capital_per_trade_pct || 0) - 0.05))}>-</button>
+                                    <span>{((rules.max_capital_per_trade_pct || 0) * 100).toFixed(0)}%</span>
+                                    <button onClick={() => setRule('max_capital_per_trade_pct', Math.min(1.00, (rules.max_capital_per_trade_pct || 0) + 0.05))}>+</button>
+                                </div>
+                            </div>
+                            <div className="setting-row">
+                                <div>
+                                    <div className="sr-label">Max Daily Intraday Trades</div>
+                                    <div className="sr-desc">Maximum intraday trades allowed per agent per day</div>
+                                </div>
+                                <div className="number-input">
+                                    <button onClick={() => setRule('max_intraday_trades', Math.max(1, (rules.max_intraday_trades || 0) - 5))}>-</button>
+                                    <span>{rules.max_intraday_trades || 0}</span>
+                                    <button onClick={() => setRule('max_intraday_trades', Math.min(200, (rules.max_intraday_trades || 0) + 5))}>+</button>
+                                </div>
+                            </div>
+                            <div className="setting-row">
+                                <div>
+                                    <div className="sr-label">Daily Drawdown Limit</div>
+                                    <div className="sr-desc">Stop trading if daily losses exceed this % of capital</div>
+                                </div>
+                                <div className="number-input">
+                                    <button onClick={() => setRule('daily_drawdown_limit', Math.max(-0.20, (rules.daily_drawdown_limit || 0) - 0.01))}>-</button>
+                                    <span>{((rules.daily_drawdown_limit || 0) * 100).toFixed(0)}%</span>
+                                    <button onClick={() => setRule('daily_drawdown_limit', Math.min(-0.01, (rules.daily_drawdown_limit || 0) + 0.01))}>+</button>
+                                </div>
+                            </div>
+                            <div className="setting-row">
+                                <div>
+                                    <div className="sr-label">Min Confidence Floor</div>
+                                    <div className="sr-desc">Minimum AI confidence score (0-100) required to enter trades</div>
+                                </div>
+                                <div className="number-input">
+                                    <button onClick={() => setRule('min_confidence', Math.max(20, (rules.min_confidence || 0) - 5))}>-</button>
+                                    <span>{rules.min_confidence || 0}%</span>
+                                    <button onClick={() => setRule('min_confidence', Math.min(95, (rules.min_confidence || 0) + 5))}>+</button>
+                                </div>
+                            </div>
+                            <div className="setting-row">
+                                <div>
+                                    <div className="sr-label">Max Stop Loss Distance</div>
+                                    <div className="sr-desc">Maximum distance allowed from entry price for stop loss</div>
+                                </div>
+                                <div className="number-input">
+                                    <button onClick={() => setRule('max_stop_loss_distance', Math.max(0.01, (rules.max_stop_loss_distance || 0) - 0.005))}>-</button>
+                                    <span>{((rules.max_stop_loss_distance || 0) * 100).toFixed(1)}%</span>
+                                    <button onClick={() => setRule('max_stop_loss_distance', Math.min(0.15, (rules.max_stop_loss_distance || 0) + 0.005))}>+</button>
+                                </div>
+                            </div>
+                            <div className="setting-row">
+                                <div>
+                                    <div className="sr-label">Min Risk-Reward Ratio</div>
+                                    <div className="sr-desc">Minimum target reward relative to stop loss risk (1:X)</div>
+                                </div>
+                                <div className="number-input">
+                                    <button onClick={() => setRule('min_risk_reward_ratio', Math.max(1.0, (rules.min_risk_reward_ratio || 0) - 0.1))}>-</button>
+                                    <span>1:{(rules.min_risk_reward_ratio || 0).toFixed(1)}</span>
+                                    <button onClick={() => setRule('min_risk_reward_ratio', Math.min(5.0, (rules.min_risk_reward_ratio || 0) + 0.1))}>+</button>
+                                </div>
+                            </div>
+                            <div className="setting-row">
+                                <div>
+                                    <div className="sr-label">Max Consecutive Losses</div>
+                                    <div className="sr-desc">Consecutive losing trades today before locking out model</div>
+                                </div>
+                                <div className="number-input">
+                                    <button onClick={() => setRule('max_consecutive_losses', Math.max(1, (rules.max_consecutive_losses || 0) - 1))}>-</button>
+                                    <span>{rules.max_consecutive_losses || 0}</span>
+                                    <button onClick={() => setRule('max_consecutive_losses', Math.min(10, (rules.max_consecutive_losses || 0) + 1))}>+</button>
+                                </div>
+                            </div>
+                            <div className="setting-row">
+                                <div>
+                                    <div className="sr-label">Max Daily Trades Per Stock</div>
+                                    <div className="sr-desc">Limit on number of trades on the same stock per model daily</div>
+                                </div>
+                                <div className="number-input">
+                                    <button onClick={() => setRule('max_trades_per_stock_daily', Math.max(1, (rules.max_trades_per_stock_daily || 0) - 1))}>-</button>
+                                    <span>{rules.max_trades_per_stock_daily || 0}</span>
+                                    <button onClick={() => setRule('max_trades_per_stock_daily', Math.min(20, (rules.max_trades_per_stock_daily || 0) + 1))}>+</button>
+                                </div>
+                            </div>
+                            <div className="setting-row">
+                                <div>
+                                    <div className="sr-label">Allowed Entry Hours (IST)</div>
+                                    <div className="sr-desc">Allowed entry hours (start to end hour)</div>
+                                </div>
+                                <div className="number-input" style={{ gap: '4px' }}>
+                                    <button onClick={() => setRule('entry_start_hour', Math.max(9.0, (rules.entry_start_hour || 0) - 0.25))}>-</button>
+                                    <span>
+                                        {Math.floor(rules.entry_start_hour || 0)}:
+                                        {(((rules.entry_start_hour || 0) % 1) * 60 === 0) ? '00' : '15'}
+                                    </span>
+                                    <button onClick={() => setRule('entry_start_hour', Math.min(11.0, (rules.entry_start_hour || 0) + 0.25))}>+</button>
+                                    <span style={{ margin: '0 4px' }}>to</span>
+                                    <button onClick={() => setRule('entry_end_hour', Math.max(12.0, (rules.entry_end_hour || 0) - 0.25))}>-</button>
+                                    <span>
+                                        {Math.floor(rules.entry_end_hour || 0)}:
+                                        {(((rules.entry_end_hour || 0) % 1) * 60 === 0) ? '00' : '15'}
+                                    </span>
+                                    <button onClick={() => setRule('entry_end_hour', Math.min(15.25, (rules.entry_end_hour || 0) + 0.25))}>+</button>
+                                </div>
+                            </div>
                         </div>
                     )}
                 </div>
@@ -139,28 +270,6 @@ const Settings = () => {
                                 <div className="sr-desc">Forcibly liquidate open positions before close (9:15 - 3:15 IST)</div>
                             </div>
                             <ToggleSwitch value={config.autoSquareOff} onChange={v => set('autoSquareOff', v)} />
-                        </div>
-                        <div className="setting-row">
-                            <div>
-                                <div className="sr-label">Max Open Positions</div>
-                                <div className="sr-desc">Simultaneous live open positions across all agents</div>
-                            </div>
-                            <div className="number-input">
-                                <button onClick={() => set('maxPositions', Math.max(1, config.maxPositions - 1))}>-</button>
-                                <span>{config.maxPositions}</span>
-                                <button onClick={() => set('maxPositions', Math.min(20, config.maxPositions + 1))}>+</button>
-                            </div>
-                        </div>
-                        <div className="setting-row">
-                            <div>
-                                <div className="sr-label">Capital Per Trade</div>
-                                <div className="sr-desc">Max allocation % of simulated balance per trade</div>
-                            </div>
-                            <div className="number-input">
-                                <button onClick={() => set('capitalPerTrade', Math.max(5, config.capitalPerTrade - 5))}>-</button>
-                                <span>{config.capitalPerTrade}%</span>
-                                <button onClick={() => set('capitalPerTrade', Math.min(50, config.capitalPerTrade + 5))}>+</button>
-                            </div>
                         </div>
                     </div>
                 </div>

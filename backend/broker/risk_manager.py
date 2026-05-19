@@ -31,17 +31,31 @@ class RiskManager:
         from database.connection import SessionLocal
         db = SessionLocal()
         try:
-            enable_short = self.get_rule(db, "enable_short_selling", False)
-            enable_lockout = self.get_rule(db, "enable_loss_lockout", True)
-            min_profit_pct = self.get_rule(db, "min_profit_threshold_pct", 0.015)
+            # Query and apply all rules dynamically
+            enable_short = self.get_rule(db, "enable_short_selling", True)
+            enable_lockout = self.get_rule(db, "enable_loss_lockout", False)
+            min_profit_pct = self.get_rule(db, "min_profit_threshold_pct", 0.005)
+            
+            self.max_open_positions = int(self.get_rule(db, "max_open_positions", 40.0))
+            self.max_capital_per_trade = self.get_rule(db, "max_capital_per_trade_pct", 0.50)
+            self.max_intraday_trades = int(self.get_rule(db, "max_intraday_trades", 70.0))
+            self.daily_drawdown_limit = self.get_rule(db, "daily_drawdown_limit", -0.05)
+            
+            self.min_confidence = self.get_rule(db, "min_confidence", 45.0)
+            self.max_stop_loss_distance = self.get_rule(db, "max_stop_loss_distance", 0.07)
+            self.min_risk_reward_ratio = self.get_rule(db, "min_risk_reward_ratio", 1.0)
+            self.max_consecutive_losses = int(self.get_rule(db, "max_consecutive_losses", 5.0))
+            self.max_trades_per_stock_daily = int(self.get_rule(db, "max_trades_per_stock_daily", 5.0))
+            self.entry_start_hour = self.get_rule(db, "entry_start_hour", 9.25)
+            self.entry_end_hour = self.get_rule(db, "entry_end_hour", 15.0)
         finally:
             db.close()
 
         checks = [
             self._check_market_hours(decision),
-            self._check_time_of_day_filters(decision), # Strict Layer 1 Time-of-day rule
-            self._check_min_confidence(decision),      # Strict Layer 4 Confidence rule
-            self._check_circuit_breaker(agent_state),  # Strict Layer 4 Drawdowns & Losses rule
+            self._check_time_of_day_filters(decision), # Dynamic Time-of-day rule
+            self._check_min_confidence(decision),      # Dynamic Confidence rule
+            self._check_circuit_breaker(agent_state),  # Dynamic Drawdowns & Losses rule
             self._check_no_short_selling(decision, enable_short),
             self._check_daily_loss_lockout(decision, agent_state, enable_lockout),
             self._check_minimum_profit_threshold(decision, min_profit_pct),
@@ -103,7 +117,7 @@ class RiskManager:
                     else:
                         break
                         
-            if consecutive_losses >= 3:
+            if consecutive_losses >= self.max_consecutive_losses:
                 return {
                     "passed": False,
                     "reason": f"CIRCUIT_BREAKER_ACTIVE: Agent hit {consecutive_losses} consecutive losses today. Paused for capital protection."
@@ -115,10 +129,10 @@ class RiskManager:
 
     def _check_min_confidence(self, decision: dict) -> dict:
         confidence = decision.get("confidence", 100)
-        if confidence < 65:
+        if confidence < self.min_confidence:
             return {
                 "passed": False,
-                "reason": f"MIN_CONFIDENCE_REJECTED: Model confidence {confidence} is below the hard guardrail floor of 65."
+                "reason": f"MIN_CONFIDENCE_REJECTED: Model confidence {confidence} is below the dynamic guardrail floor of {self.min_confidence}."
             }
         return {"passed": True}
 
@@ -144,25 +158,24 @@ class RiskManager:
 
     def _check_time_of_day_filters(self, decision: dict) -> dict:
         now = get_ist_now()
-        # Enforce strict Layer 1 time-of-day filters:
-        # - 09:15–09:30 IST: No entries (opening volatility)
-        # - 09:30–14:00 IST: Normal intraday entries permitted
-        # - 14:00–15:00 IST: Only exit or HOLD. No new entries.
-        # - 15:00–15:15 IST: Square off all positions.
-        
         current_time_str = now.strftime("%H:%M")
+        hour_float = now.hour + now.minute / 60.0
         
         # Enforce if it's a decision to enter (BUY or SHORT)
         if decision.get("decision") in ["BUY", "SHORT"]:
-            if "09:15" <= current_time_str < "09:30":
+            if hour_float < self.entry_start_hour:
+                start_h = int(self.entry_start_hour)
+                start_m = int((self.entry_start_hour - start_h) * 60)
                 return {
                     "passed": False,
-                    "reason": f"TIME_FILTER_REJECTED: Entry requested at {current_time_str}. Opening 15 minutes (09:15–09:30 IST) are noise-heavy; no entries allowed."
+                    "reason": f"TIME_FILTER_REJECTED: Entry requested at {current_time_str}. Dynamic entry start is set to {start_h:02d}:{start_m:02d} IST."
                 }
-            if current_time_str >= "14:00":
+            if hour_float >= self.entry_end_hour:
+                end_h = int(self.entry_end_hour)
+                end_m = int((self.entry_end_hour - end_h) * 60)
                 return {
                     "passed": False,
-                    "reason": f"TIME_FILTER_REJECTED: Entry requested at {current_time_str}. Entries are disabled after 14:00 IST (2:00 PM)."
+                    "reason": f"TIME_FILTER_REJECTED: Entry requested at {current_time_str}. Entries are disabled after {end_h:02d}:{end_m:02d} IST."
                 }
         return {"passed": True}
 
@@ -213,10 +226,10 @@ class RiskManager:
             return {"passed": False, "reason": "Missing entry or stop loss price"}
             
         sl_distance = abs(entry - sl) / entry
-        if sl_distance > 0.03:
+        if sl_distance > self.max_stop_loss_distance:
             return {
                 "passed": False,
-                "reason": f"Stop loss too wide: {sl_distance:.1%} (max 3%)"
+                "reason": f"Stop loss too wide: {sl_distance:.1%} (max {self.max_stop_loss_distance:.1%})"
             }
         return {"passed": True}
 
@@ -235,10 +248,10 @@ class RiskManager:
             return {"passed": False, "reason": "Risk is zero (stop loss = entry)"}
 
         rr_ratio = reward / risk
-        if rr_ratio < 1.5:
+        if rr_ratio < self.min_risk_reward_ratio:
             return {
                 "passed": False,
-                "reason": f"Risk-reward ratio too low: 1:{rr_ratio:.1f} (min 1:1.5)"
+                "reason": f"Risk-reward ratio too low: 1:{rr_ratio:.1f} (min 1:{self.min_risk_reward_ratio:.1f})"
             }
         return {"passed": True}
 
@@ -336,10 +349,10 @@ class RiskManager:
                 Trade.entry_time >= today_start
             ).count()
 
-            if trades_today >= 2:
+            if trades_today >= self.max_trades_per_stock_daily:
                 return {
                     "passed": False,
-                    "reason": f"PER_STOCK_LIMIT_EXCEEDED: Agent has already traded {symbol} {trades_today} times today. Maximum allowed is 2 trades per stock per model per day."
+                    "reason": f"PER_STOCK_LIMIT_EXCEEDED: Agent has already traded {symbol} {trades_today} times today. Maximum allowed is {self.max_trades_per_stock_daily} trades per stock per model per day."
                 }
             return {"passed": True}
         finally:

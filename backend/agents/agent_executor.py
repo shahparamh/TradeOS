@@ -13,7 +13,6 @@ from database.connection import SessionLocal
 from database.models import Agent, AIResponse
 from utils.logger import setup_logger
 
-from agents.openrouter_agent import query_openrouter_free
 from agents.ollama_agent import query_ollama
 
 logger = setup_logger("agent_executor")
@@ -29,8 +28,6 @@ async def query_agent_pipeline(agent, payload_dict: dict, opportunity: dict) -> 
             decision = await query_gemini(payload_str)
         elif agent.provider == "groq":
             decision = await query_groq(payload_str)
-        elif agent.provider == "openrouter":
-            decision = await query_openrouter_free(payload_dict)
         elif agent.provider == "ollama":
             import os
             if os.getenv("RENDER"):
@@ -82,8 +79,6 @@ RESPONSE FORMAT (strict JSON):
                 critique = await query_gemini(objection_prompt)
             elif agent.provider == "groq":
                 critique = await query_groq(objection_prompt)
-            elif agent.provider == "openrouter":
-                critique = await query_openrouter_free({"prompt": objection_prompt})
             elif agent.provider == "ollama":
                 critique = await query_ollama(objection_prompt)
                 

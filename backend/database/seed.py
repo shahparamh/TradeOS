@@ -8,6 +8,19 @@ def seed_agents():
         # Create tables
         Base.metadata.create_all(bind=engine)
 
+        # Purge existing openrouter agents and their dependencies
+        openrouter_agents = db.query(Agent).filter(Agent.provider == "openrouter").all()
+        if openrouter_agents:
+            from database.models import Trade, Position, DailyPerformance, AIResponse, AgentDailyStrategy
+            for agent in openrouter_agents:
+                db.query(Position).filter(Position.agent_id == agent.id).delete()
+                db.query(Trade).filter(Trade.agent_id == agent.id).delete()
+                db.query(DailyPerformance).filter(DailyPerformance.agent_id == agent.id).delete()
+                db.query(AIResponse).filter(AIResponse.agent_id == agent.id).delete()
+                db.query(AgentDailyStrategy).filter(AgentDailyStrategy.agent_id == agent.id).delete()
+                db.delete(agent)
+            db.commit()
+
         # Delete old agents and re-seed with correct providers
         existing_agents = {a.name: a for a in db.query(Agent).all()}
         
@@ -18,8 +31,6 @@ def seed_agents():
             agents_to_add.append(Agent(name="Groq-Llama", provider="groq", model_name=settings.GROQ_MODEL, cash_balance=settings.INITIAL_CAPITAL))
         if "Local-Ollama" not in existing_agents:
             agents_to_add.append(Agent(name="Local-Ollama", provider="ollama", model_name=settings.OLLAMA_MODEL, cash_balance=settings.INITIAL_CAPITAL))
-        if "OpenRouter" not in existing_agents:
-            agents_to_add.append(Agent(name="OpenRouter", provider="openrouter", model_name="openrouter/free", cash_balance=settings.INITIAL_CAPITAL))
             
         if agents_to_add:
             db.add_all(agents_to_add)
