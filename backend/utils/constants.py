@@ -1,5 +1,7 @@
 # Watchlist — Liquid NSE stocks for initial simulation
 WATCHLIST = [
+    "^NSEI",
+    "^NSEBANK",
     "ANANTRAJ.NS",
     "RCF.NS",
     "SBIN.NS",

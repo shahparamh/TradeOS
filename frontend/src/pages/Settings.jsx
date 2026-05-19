@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Key, Shield, Bell, Zap, Database, Save, CheckCircle, Newspaper } from 'lucide-react';
+import { Settings as SettingsIcon, Key, Shield, Bell, Zap, Database, Save, CheckCircle, Newspaper, Trash2, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api, { settingsAPI } from '../services/api';
 
@@ -37,7 +37,9 @@ const Settings = () => {
         max_consecutive_losses: 5,
         max_trades_per_stock_daily: 5,
         entry_start_hour: 9.25,
-        entry_end_hour: 15.0
+        entry_end_hour: 15.0,
+        enable_fno_trading: true,
+        starting_capital_per_agent: 5000000.0
     });
     
     const [loadingRules, setLoadingRules] = useState(true);
@@ -242,6 +244,13 @@ const Settings = () => {
                                     <button onClick={() => setRule('entry_end_hour', Math.min(15.25, (rules.entry_end_hour || 0) + 0.25))}>+</button>
                                 </div>
                             </div>
+                            <div className="setting-row">
+                                <div>
+                                    <div className="sr-label">Enable Futures & Options (F&O)</div>
+                                    <div className="sr-desc">Allow agents to trade option premiums (CE/PE) and index futures</div>
+                                </div>
+                                <ToggleSwitch value={rules.enable_fno_trading !== false} onChange={v => setRule('enable_fno_trading', v)} />
+                            </div>
                         </div>
                     )}
                 </div>
@@ -341,6 +350,50 @@ const Settings = () => {
                                 } catch (e) { toast.error('Failed to run monitor'); }
                             }} style={{ padding: '6px 12px', fontSize: '11px' }}>
                                 Run Check
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Platform Reset & Capital Configuration */}
+                <div className="card settings-card" style={{ borderColor: 'rgba(239, 68, 68, 0.2)' }}>
+                    <h3 className="section-title" style={{ color: '#ef4444' }}><Trash2 size={16} /> Platform Reset & Capital Setup</h3>
+                    <div className="settings-rows">
+                        <div className="setting-row">
+                            <div>
+                                <div className="sr-label">Starting Capital per Agent</div>
+                                <div className="sr-desc">Set starting balance (INR) to allocate to each model on reset</div>
+                            </div>
+                            <div className="number-input" style={{ gap: '6px' }}>
+                                <button onClick={() => setRule('starting_capital_per_agent', Math.max(100000, (rules.starting_capital_per_agent || 5000000) - 500000))}>-</button>
+                                <span style={{ fontWeight: 'bold' }}>₹{((rules.starting_capital_per_agent || 5000000) / 100000).toFixed(0)} Lakh</span>
+                                <button onClick={() => setRule('starting_capital_per_agent', Math.min(100000000, (rules.starting_capital_per_agent || 5000000) + 500000))}>+</button>
+                            </div>
+                        </div>
+                        <div className="setting-row">
+                            <div>
+                                <div className="sr-label">Reset Database & Re-initialize</div>
+                                <div className="sr-desc" style={{ color: 'var(--text-secondary)' }}>
+                                    Warning: This will permanently delete all trades, positions, and logs. Balances will be reset to ₹{(rules.starting_capital_per_agent || 5000000).toLocaleString()}.
+                                </div>
+                            </div>
+                            <button className="btn-primary" onClick={async () => {
+                                const confirmReset = window.confirm("WARNING: Are you absolutely sure you want to reset the platform? This will delete all trade history and agent positions permanently.");
+                                if (!confirmReset) return;
+                                
+                                const loadingToast = toast.loading("Resetting platform and applying starting capital...");
+                                try {
+                                    const res = await api.post('/settings/reset', {
+                                        starting_capital: rules.starting_capital_per_agent || 5000000
+                                    });
+                                    toast.success(res.data?.message || "Platform reset successfully!", { id: loadingToast });
+                                    setTimeout(() => window.location.reload(), 1500);
+                                } catch (e) {
+                                    console.error(e);
+                                    toast.error(e.response?.data?.detail || "Failed to reset database.", { id: loadingToast });
+                                }
+                            }} style={{ backgroundColor: '#ef4444', color: 'white', padding: '8px 16px', fontWeight: 'bold' }}>
+                                Reset Platform
                             </button>
                         </div>
                     </div>

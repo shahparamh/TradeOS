@@ -136,11 +136,12 @@ Respond ONLY with a valid JSON object. No markdown, no explanation, no code fenc
     },
     "decision": "BUY" | "SHORT" | "HOLD",
     "confidence": <integer 65–100 (confidence below 65 MUST output HOLD)>,
-    "entry_price": <float>,
-    "stop_loss": <float>,
-    "target": <float>,
-    "quantity": <integer>,
-    "trade_type": "INTRADAY" | "SWING" | "NONE",
+    "entry_price": <float - entry price of underlying stock/index>,
+    "stop_loss": <float - stop loss price of underlying stock/index>,
+    "target": <float - target price of underlying stock/index>,
+    "quantity": <integer - number of lots for F&O or shares for Equity>,
+    "trade_type": "INTRADAY" | "SWING" | "FUTURES" | "OPTIONS" | "NONE",
+    "position_type": "LONG" | "SHORT" | "BUY_CE" | "BUY_PE" | "SELL_CE" | "SELL_PE",
     "pillars_aligned": ["TECHNICALS", "DERIVATIVES", "FUNDAMENTALS", "MARKET_SENTIMENT"],
     "risk_reward_ratio": <float>,
     "trailing_stop": <float - suggested trailing stop activation trigger, e.g. 0.01 for 1% moves>,
@@ -367,6 +368,16 @@ def validate_decision(parsed: dict) -> dict:
         if not quantity or quantity <= 0:
             errors.append("Missing or invalid quantity")
 
+        trade_type = parsed.get("trade_type", "INTRADAY").upper()
+        if trade_type not in ["INTRADAY", "SWING", "FUTURES", "OPTIONS"]:
+            trade_type = "INTRADAY"
+        parsed["trade_type"] = trade_type
+        
+        position_type = parsed.get("position_type", "LONG" if decision == "BUY" else "SHORT").upper()
+        if position_type not in ["LONG", "SHORT", "BUY_CE", "BUY_PE", "SELL_CE", "SELL_PE"]:
+            position_type = "LONG" if decision == "BUY" else "SHORT"
+        parsed["position_type"] = position_type
+
         # Rule: Stop-loss within 2% of entry
         if entry_price > 0 and stop_loss > 0:
             sl_pct = abs(entry_price - stop_loss) / entry_price
@@ -375,10 +386,11 @@ def validate_decision(parsed: dict) -> dict:
 
         # Rule: Risk-reward >= 1.5
         if entry_price > 0 and stop_loss > 0 and target > 0:
-            if decision == "BUY":
+            is_bullish = position_type in ["LONG", "BUY_CE", "SELL_PE"]
+            if is_bullish:
                 risk = entry_price - stop_loss
                 reward = target - entry_price
-            else:  # SHORT
+            else:  # Bearish (SHORT, BUY_PE, SELL_CE)
                 risk = stop_loss - entry_price
                 reward = entry_price - target
 

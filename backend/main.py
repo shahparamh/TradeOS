@@ -40,10 +40,10 @@ def seed_db():
     # 1. Seed default agents
     existing_names = {a.name for a in db.query(Agent).all()}
     default_agents = [
-        Agent(name="Gemini", model_name=settings.GEMINI_MODEL, provider="google", cash_balance=100000.0, total_pnl=0.0),
-        Agent(name="Groq-Llama", model_name="llama-3.3-70b", provider="groq", cash_balance=100000.0, total_pnl=0.0),
-        Agent(name="DeepSeek-R1", model_name="deepseek-reasoning", provider="deepseek", cash_balance=100000.0, total_pnl=0.0),
-        Agent(name="Local-Ollama", model_name="llama3.2", provider="ollama", cash_balance=100000.0, total_pnl=0.0)
+        Agent(name="Gemini", model_name=settings.GEMINI_MODEL, provider="google", cash_balance=settings.INITIAL_CAPITAL, total_pnl=0.0),
+        Agent(name="Groq-Llama", model_name="llama-3.3-70b", provider="groq", cash_balance=settings.INITIAL_CAPITAL, total_pnl=0.0),
+        Agent(name="DeepSeek-R1", model_name="deepseek-reasoning", provider="deepseek", cash_balance=settings.INITIAL_CAPITAL, total_pnl=0.0),
+        Agent(name="Local-Ollama", model_name="llama3.2", provider="ollama", cash_balance=settings.INITIAL_CAPITAL, total_pnl=0.0)
     ]
     for agent in default_agents:
         if agent.name not in existing_names:
@@ -81,7 +81,9 @@ def seed_db():
         ("max_consecutive_losses", "float", None, 5.0, "Circuit breaker max consecutive daily losses"),
         ("max_trades_per_stock_daily", "float", None, 5.0, "Maximum trades per stock per model per day"),
         ("entry_start_hour", "float", None, 9.25, "Allowed entry start hour (e.g., 9.25 for 9:15 AM)"),
-        ("entry_end_hour", "float", None, 15.0, "Allowed entry end hour (e.g., 15.0 for 3:00 PM)")
+        ("entry_end_hour", "float", None, 15.0, "Allowed entry end hour (e.g., 15.0 for 3:00 PM)"),
+        ("enable_fno_trading", "boolean", True, None, "Toggle Futures & Options (F&O) accessibility for AI models"),
+        ("starting_capital_per_agent", "float", None, 5000000.0, "Starting balance per AI agent upon platform reset")
     ]
     for key, val_type, b_val, n_val, desc in rules_to_seed:
         existing = db.query(SystemRule).filter(SystemRule.key == key).first()
@@ -159,6 +161,52 @@ async def trigger_monitor_manually():
 async def trigger_pre_market_manually():
     asyncio.create_task(trading_scheduler.run_pre_market_session())
     return {"status": "triggered", "message": "Pre-market strategy planning started in background"}
+
+@app.post("/api/settings/reset")
+def reset_platform_data(payload: dict = None):
+    from fastapi import HTTPException
+    from database.connection import SessionLocal
+    from database.models import Trade, Position, AIResponse, DailyPerformance, AgentDailyStrategy, Agent, SystemRule
+    
+    db = SessionLocal()
+    try:
+        # Determine starting capital
+        capital = 5000000.0
+        if payload and "starting_capital" in payload:
+            capital = float(payload["starting_capital"])
+        else:
+            # Query starting capital from DB settings
+            rule = db.query(SystemRule).filter(SystemRule.key == "starting_capital_per_agent").first()
+            if rule and rule.numeric_value is not None:
+                capital = float(rule.numeric_value)
+        
+        # 1. Truncate / delete all transactional tables
+        db.query(Position).delete()
+        db.query(Trade).delete()
+        db.query(AIResponse).delete()
+        db.query(DailyPerformance).delete()
+        db.query(AgentDailyStrategy).delete()
+        
+        # 2. Reset agent balances
+        agents = db.query(Agent).all()
+        for agent in agents:
+            agent.cash_balance = capital
+            agent.total_pnl = 0.0
+            
+        # 3. Update the starting capital rule in db
+        cap_rule = db.query(SystemRule).filter(SystemRule.key == "starting_capital_per_agent").first()
+        if cap_rule:
+            cap_rule.numeric_value = capital
+        else:
+            db.add(SystemRule(key="starting_capital_per_agent", value_type="float", numeric_value=capital, description="Starting balance per AI agent upon platform reset"))
+            
+        db.commit()
+        return {"status": "success", "message": f"Platform successfully reset! All agent balances set to ₹{capital:,.2f}"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database reset failed: {str(e)}")
+    finally:
+        db.close()
 
 @app.get("/api/scheduler/pre-market/today")
 def get_today_pre_market_strategy():

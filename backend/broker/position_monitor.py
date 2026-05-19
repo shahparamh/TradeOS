@@ -21,14 +21,14 @@ class PositionMonitor:
 
         for pos in positions:
             try:
-                # 1. Fetch live price
+                # 1. Fetch live price of the underlying asset
                 price_data = fetch_live_price(pos.symbol)
                 if not price_data:
                     continue
                 
                 current_price = price_data["price"]
                 
-                # 2. Evaluate exit conditions
+                # 2. Evaluate exit conditions based on underlying price
                 exit_reason = self._evaluate_exit(pos, current_price)
                 
                 if exit_reason:
@@ -36,10 +36,7 @@ class PositionMonitor:
                     agent = db_session.query(Agent).get(pos.agent_id)
                     trade = db_session.query(Trade).get(pos.trade_id)
                     
-                    if pos.position_type == "LONG":
-                        result = self.broker.sell(agent, trade, current_price, exit_reason, db_session)
-                    else:
-                        result = self.broker.cover(agent, trade, current_price, exit_reason, db_session)
+                    result = self.broker.close_position(agent, trade, current_price, exit_reason, db_session)
                     
                     actions.append({
                         "symbol": pos.symbol,
@@ -61,23 +58,24 @@ class PositionMonitor:
         return actions
 
     def _evaluate_exit(self, position, current_price: float) -> str | None:
-        """Determines if a position should be closed."""
+        """Determines if a position should be closed based on dynamic SL/Target rules."""
         now = get_ist_now()
         
         # 1. Intraday Square-off (3:15 PM IST)
-        if position.trade_type == "INTRADAY" or True: # Force check for all during simulation
+        if position.trade_type == "INTRADAY":
             if (now.hour == 15 and now.minute >= 15) or now.hour > 15:
                 return "SQUARED_OFF"
 
-        # 2. LONG Position Logic
-        if position.position_type == "LONG":
+        # 2. Bullish positions (LONG, BUY_CE, SELL_PE)
+        is_bullish = position.position_type in ["LONG", "BUY_CE", "SELL_PE"]
+        
+        if is_bullish:
             if current_price >= position.target_price:
                 return "TARGET_HIT"
             if current_price <= position.stop_loss:
                 return "SL_HIT"
-
-        # 3. SHORT Position Logic
-        elif position.position_type == "SHORT":
+        # 3. Bearish positions (SHORT, BUY_PE, SELL_CE)
+        else:
             if current_price <= position.target_price:
                 return "TARGET_HIT"
             if current_price >= position.stop_loss:
@@ -86,10 +84,44 @@ class PositionMonitor:
         return None
 
     def _update_unrealized_pnl(self, position, current_price: float):
-        """Updates the unrealized PnL in the database."""
-        if position.position_type == "LONG":
-            position.unrealized_pnl = (current_price - position.entry_price) * position.quantity
-        else:
-            position.unrealized_pnl = (position.entry_price - current_price) * position.quantity
+        """Updates the unrealized PnL in the database based on F&O contract math."""
+        trade_type = position.trade_type
+        position_type = position.position_type
+        symbol = position.symbol
+        quantity = position.quantity
+        
+        # Determine lot size
+        lot_size = 1
+        if trade_type in ["FUTURES", "OPTIONS"]:
+            from broker.virtual_broker import get_lot_size
+            lot_size = get_lot_size(symbol)
+            
+        if trade_type == "OPTIONS":
+            entry_prem = position.entry_price * 0.02
+            
+            if position_type == "BUY_CE":
+                exit_prem = max(0.0, entry_prem + (current_price - position.entry_price) * 0.5)
+                position.unrealized_pnl = (exit_prem - entry_prem) * lot_size * quantity
+            elif position_type == "BUY_PE":
+                exit_prem = max(0.0, entry_prem + (position.entry_price - current_price) * 0.5)
+                position.unrealized_pnl = (exit_prem - entry_prem) * lot_size * quantity
+            elif position_type == "SELL_CE":
+                exit_prem = max(0.0, entry_prem + (current_price - position.entry_price) * 0.5)
+                position.unrealized_pnl = (entry_prem - exit_prem) * lot_size * quantity
+            elif position_type == "SELL_PE":
+                exit_prem = max(0.0, entry_prem + (position.entry_price - current_price) * 0.5)
+                position.unrealized_pnl = (entry_prem - exit_prem) * lot_size * quantity
+                
+        elif trade_type == "FUTURES":
+            if position_type == "LONG":
+                position.unrealized_pnl = (current_price - position.entry_price) * lot_size * quantity
+            else:  # SHORT
+                position.unrealized_pnl = (position.entry_price - current_price) * lot_size * quantity
+                
+        else:  # Equity
+            if position_type == "LONG":
+                position.unrealized_pnl = (current_price - position.entry_price) * quantity
+            else:
+                position.unrealized_pnl = (position.entry_price - current_price) * quantity
         
         position.current_price = current_price

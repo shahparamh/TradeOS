@@ -35,6 +35,7 @@ class RiskManager:
             enable_short = self.get_rule(db, "enable_short_selling", True)
             enable_lockout = self.get_rule(db, "enable_loss_lockout", False)
             min_profit_pct = self.get_rule(db, "min_profit_threshold_pct", 0.005)
+            enable_fno = self.get_rule(db, "enable_fno_trading", True)
             
             self.max_open_positions = int(self.get_rule(db, "max_open_positions", 40.0))
             self.max_capital_per_trade = self.get_rule(db, "max_capital_per_trade_pct", 0.50)
@@ -50,11 +51,12 @@ class RiskManager:
             self.entry_end_hour = self.get_rule(db, "entry_end_hour", 15.0)
         finally:
             db.close()
-
+ 
         checks = [
             self._check_market_hours(decision),
             self._check_time_of_day_filters(decision), # Dynamic Time-of-day rule
             self._check_min_confidence(decision),      # Dynamic Confidence rule
+            self._check_fno_disabled(decision, enable_fno), # Dynamic F&O rule
             self._check_circuit_breaker(agent_state),  # Dynamic Drawdowns & Losses rule
             self._check_no_short_selling(decision, enable_short),
             self._check_daily_loss_lockout(decision, agent_state, enable_lockout),
@@ -182,20 +184,67 @@ class RiskManager:
                 }
         return {"passed": True}
 
+    def _check_fno_disabled(self, decision: dict, enable_fno: bool) -> dict:
+        trade_type = decision.get("trade_type", "INTRADAY")
+        if trade_type in ["FUTURES", "OPTIONS"] and not enable_fno:
+            return {"passed": False, "reason": "F&O trading is disabled in system configurations."}
+        return {"passed": True}
+
     def _check_capital_limit(self, decision: dict, agent_state: dict) -> dict:
         entry_price = decision.get("entry_price") or decision.get("price")
         if not entry_price:
             return {"passed": False, "reason": "Missing entry price in decision"}
 
-        trade_value = decision["quantity"] * entry_price
-        max_allowed = agent_state["cash_balance"] * self.max_capital_per_trade
+        trade_type = decision.get("trade_type", "INTRADAY")
+        position_type = decision.get("position_type", "LONG")
+        symbol = decision.get("symbol", "")
+        quantity = decision.get("quantity", 1)
 
+        lot_size = 1
+        if trade_type in ["FUTURES", "OPTIONS"]:
+            from broker.virtual_broker import get_lot_size
+            lot_size = get_lot_size(symbol)
+
+        # Compute cost / margin to open
+        if trade_type == "OPTIONS":
+            premium = entry_price * 0.02
+            if position_type in ["BUY_CE", "BUY_PE"]:
+                trade_value = premium * lot_size * quantity
+            else: # Short option
+                margin = entry_price * lot_size * quantity * 0.15
+                premium_val = premium * lot_size * quantity
+                trade_value = margin - premium_val
+        elif trade_type == "FUTURES":
+            trade_value = entry_price * lot_size * quantity * 0.10
+        else: # Equity
+            trade_value = entry_price * quantity
+
+        # Safety rule: don't spend more cash than we have
+        if trade_value > agent_state["cash_balance"]:
+            return {
+                "passed": False,
+                "reason": f"Insufficient cash balance. Required: ₹{trade_value:,.2f}, Available: ₹{agent_state['cash_balance']:,.2f}"
+            }
+
+        # Check maximum trade size limitation (if enforced)
+        max_allowed = agent_state["cash_balance"] * self.max_capital_per_trade
         if trade_value > max_allowed:
-            adjusted_qty = int(max_allowed / entry_price)
+            # For F&O, quantity is in lots. Reduce lots.
+            if trade_type == "OPTIONS":
+                if position_type in ["BUY_CE", "BUY_PE"]:
+                    cost_per_unit = entry_price * 0.02 * lot_size
+                else:
+                    cost_per_unit = (entry_price * lot_size * 0.15) - (entry_price * 0.02 * lot_size)
+            elif trade_type == "FUTURES":
+                cost_per_unit = entry_price * lot_size * 0.10
+            else:
+                cost_per_unit = entry_price
+
+            adjusted_qty = int(max_allowed / cost_per_unit)
             if adjusted_qty < 1:
                 return {
                     "passed": False,
-                    "reason": f"Insufficient capital. Trade: ₹{trade_value:,.0f}, Max: ₹{max_allowed:,.0f}"
+                    "reason": f"Trade size ₹{trade_value:,.0f} exceeds max allowed ₹{max_allowed:,.0f} (capital limit per trade). Cannot adjust below 1."
                 }
             
             old_qty = decision["quantity"]

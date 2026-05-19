@@ -41,6 +41,7 @@ export const marketAPI = {
     getPrice: (symbol) => api.get(`/market/price/${symbol}`),
     getCandles: (symbol) => api.get(`/market/candles/${symbol}`),
     getNews: (symbol) => api.get(`/market/news/${symbol}`),
+    getMacroNews: () => api.get('/market/news/macro'),
     getHeatmap: () => api.get('/market/heatmap'),
 };
 
@@ -58,6 +59,7 @@ export const brokerAPI = {
     closePosition: (id) => api.post(`/broker/positions/${id}/close`),
     getAgentStatus: (id) => api.get(`/broker/agents/${id}/status`),
     getDaily: () => api.get('/broker/performance/daily'),
+    placeManualTrade: (data) => api.post('/broker/trade/manual', data),
 };
 
 export const performanceAPI = {

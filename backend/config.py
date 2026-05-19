@@ -23,7 +23,7 @@ class Settings:
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./tradeos.db")
 
     # Trading
-    INITIAL_CAPITAL: float = float(os.getenv("INITIAL_CAPITAL", 100000))
+    INITIAL_CAPITAL: float = float(os.getenv("INITIAL_CAPITAL", 5000000.0))
     MAX_CAPITAL_PER_TRADE: float = float(os.getenv("MAX_CAPITAL_PER_TRADE", 0.20))
     MAX_OPEN_POSITIONS: int = int(os.getenv("MAX_OPEN_POSITIONS", 5))
     MAX_INTRADAY_TRADES: int = int(os.getenv("MAX_INTRADAY_TRADES", 3))

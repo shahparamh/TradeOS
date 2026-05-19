@@ -250,14 +250,16 @@ async def execute_all_agents(
                         except Exception:
                             current_price = decision.get("entry_price")
 
+                    trade_type = decision.get("trade_type", "INTRADAY")
+                    position_type = decision.get("position_type", "LONG" if decision["decision"] == "BUY" else "SHORT")
                     if decision["decision"] == "BUY":
                         broker.buy(agent, opportunity["symbol"], decision["quantity"], 
                                    current_price, decision["stop_loss"], 
-                                   decision["target"], decision["confidence"], "INTRADAY", db)
+                                   decision["target"], decision["confidence"], trade_type, db, position_type)
                     elif decision["decision"] == "SHORT":
                         broker.short_sell(agent, opportunity["symbol"], decision["quantity"], 
                                           current_price, decision["stop_loss"], 
-                                          decision["target"], decision["confidence"], db)
+                                          decision["target"], decision["confidence"], db, trade_type, position_type)
                 else:
                     logger.warning(f"Trade REJECTED for {agent_name}: {risk_res['rejection_reason']}")
 

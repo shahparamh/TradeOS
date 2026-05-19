@@ -121,7 +121,8 @@ class TestTradeOSFeatures(unittest.TestCase):
             "entry_price": 2400.0,
             "quantity": 10,
             "stop_loss": 2360.0,
-            "target": 2480.0
+            "target": 2480.0,
+            "ignore_hours": True
         }
         
         agent_state = {
@@ -180,7 +181,8 @@ class TestTradeOSFeatures(unittest.TestCase):
             "entry_price": 100.0,
             "quantity": 100,
             "stop_loss": 98.5,
-            "target": 100.75
+            "target": 100.75,
+            "ignore_hours": True
         }
         result_low = rm.validate_trade(decision_low, agent_state)
         self.assertFalse(result_low["approved"])
@@ -244,7 +246,8 @@ class TestTradeOSFeatures(unittest.TestCase):
             "entry_price": 1460.0,
             "quantity": 10,
             "stop_loss": 1430.0,
-            "target": 1510.0
+            "target": 1510.0,
+            "ignore_hours": True
         }
         
         result_locked = rm.validate_trade(decision_lock, agent_state)

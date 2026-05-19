@@ -183,3 +183,84 @@ def get_agent_status(agent_id: int, db: Session = Depends(get_db)):
 @router.get("/performance/daily", response_model=None)
 def get_daily_performance(db: Session = Depends(get_db)):
     return db.query(DailyPerformance).order_by(DailyPerformance.date.desc()).all()
+
+
+from pydantic import BaseModel
+
+class ManualTradeRequest(BaseModel):
+    agent_id: int
+    symbol: str
+    action: str
+    quantity: int
+    trade_type: str
+    position_type: str
+    stop_loss: float
+    target_price: float
+
+@router.post("/trade/manual")
+def place_manual_trade(req: ManualTradeRequest, db: Session = Depends(get_db)):
+    from config import settings
+    from broker.virtual_broker import VirtualBroker
+
+    agent = db.query(Agent).get(req.agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    symbol = req.symbol.upper().strip()
+    if not symbol.endswith(".NS") and symbol not in ["^NSEI", "^NSEBANK", "NIFTY", "BANKNIFTY", "FINNIFTY"]:
+        # Auto-append .NS for Indian equities if it's not indices or derivative contracts
+        if not any(char in symbol for char in ["-", "^"]):
+            symbol = f"{symbol}.NS"
+
+    try:
+        price_data = fetch_live_price(symbol)
+        live_price = price_data.get("price")
+        if not live_price or live_price <= 0:
+            raise ValueError(f"Invalid live price fetched for {symbol}")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to fetch live price for symbol '{symbol}': {str(e)}")
+
+    broker = VirtualBroker(settings)
+
+    try:
+        if req.action.upper() == "BUY":
+            res = broker.buy(
+                agent=agent,
+                symbol=symbol,
+                quantity=req.quantity,
+                market_price=live_price,
+                stop_loss=req.stop_loss,
+                target=req.target_price,
+                confidence=100,
+                trade_type=req.trade_type,
+                db_session=db,
+                position_type=req.position_type
+            )
+        else:
+            res = broker.short_sell(
+                agent=agent,
+                symbol=symbol,
+                quantity=req.quantity,
+                market_price=live_price,
+                stop_loss=req.stop_loss,
+                target=req.target_price,
+                confidence=100,
+                db_session=db,
+                trade_type=req.trade_type,
+                position_type=req.position_type
+            )
+
+        if not res.get("success"):
+            raise HTTPException(status_code=400, detail=res.get("error", "Failed to place manual trade"))
+
+        db.commit()
+        return {
+            "status": "success",
+            "message": f"Manual trade executed: {req.action} {req.quantity} {symbol} @ ₹{res.get('fill_price'):.2f}"
+        }
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+

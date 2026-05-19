@@ -31,7 +31,9 @@ def get_system_rules(db: Session = Depends(get_db)):
         "max_consecutive_losses": {"type": "float", "numeric_value": 5.0, "desc": "Circuit breaker max consecutive daily losses"},
         "max_trades_per_stock_daily": {"type": "float", "numeric_value": 5.0, "desc": "Maximum trades per stock per model per day"},
         "entry_start_hour": {"type": "float", "numeric_value": 9.25, "desc": "Allowed entry start hour (e.g., 9.25 for 9:15 AM)"},
-        "entry_end_hour": {"type": "float", "numeric_value": 15.0, "desc": "Allowed entry end hour (e.g., 15.0 for 3:00 PM)"}
+        "entry_end_hour": {"type": "float", "numeric_value": 15.0, "desc": "Allowed entry end hour (e.g., 15.0 for 3:00 PM)"},
+        "enable_fno_trading": {"type": "boolean", "bool_value": True, "desc": "Toggle Futures & Options (F&O) accessibility for AI models"},
+        "starting_capital_per_agent": {"type": "float", "numeric_value": 5000000.0, "desc": "Starting balance per AI agent upon platform reset"}
     }
     
     # Build actual map
@@ -98,3 +100,37 @@ def update_system_rules(payload: RuleUpdate, db: Session = Depends(get_db), curr
             
     db.commit()
     return {"status": "success", "message": "System trading rules updated successfully."}
+
+class ResetPayload(BaseModel):
+    starting_capital: float
+
+@router.post("/reset")
+def reset_database(payload: ResetPayload, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    if current_user.role not in ["admin", "trader"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to reset the platform."
+        )
+        
+    try:
+        from database.models import Agent, Trade, Position, DailyPerformance, AIResponse, AgentDailyStrategy
+        
+        db.query(Position).delete()
+        db.query(Trade).delete()
+        db.query(DailyPerformance).delete()
+        db.query(AgentDailyStrategy).delete()
+        db.query(AIResponse).delete()
+        
+        agents = db.query(Agent).all()
+        for agent in agents:
+            agent.cash_balance = payload.starting_capital
+            agent.total_pnl = 0.0
+            
+        db.commit()
+        return {"status": "success", "message": f"Platform reset successfully! Cash balances refreshed to ₹{payload.starting_capital:,.2f}."}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Database reset failed: {str(e)}"
+        )

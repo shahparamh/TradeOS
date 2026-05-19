@@ -33,23 +33,26 @@ const Dashboard = () => {
     const [positions, setPositions] = useState([]);
     const [trades, setTrades] = useState([]);
     const [leaderboard, setLeaderboard] = useState([]);
+    const [macroNews, setMacroNews] = useState([]);
     const [loading, setLoading] = useState(true);
     
     useEffect(() => {
         const fetchData = async () => {
             try {
                 // Fetch each with its own error handling to prevent blocking
-                const [idxRes, posRes, tradeRes, lbRes] = await Promise.allSettled([
+                const [idxRes, posRes, tradeRes, lbRes, newsRes] = await Promise.allSettled([
                     marketAPI.getIndices(),
                     brokerAPI.getPositions(),
                     brokerAPI.getTrades(),
-                    brokerAPI.getLeaderboard()
+                    brokerAPI.getLeaderboard(),
+                    marketAPI.getMacroNews()
                 ]);
 
                 if (idxRes.status === 'fulfilled') setIndices(idxRes.value.data);
                 if (posRes.status === 'fulfilled') setPositions(posRes.value.data);
                 if (tradeRes.status === 'fulfilled') setTrades(tradeRes.value.data.slice(0, 6));
                 if (lbRes.status === 'fulfilled') setLeaderboard(lbRes.value.data);
+                if (newsRes.status === 'fulfilled') setMacroNews(newsRes.value.data || []);
                 
             } catch (err) {
                 console.error("Critical dashboard fetch error", err);
@@ -58,7 +61,7 @@ const Dashboard = () => {
             }
         };
         fetchData();
-        const interval = setInterval(fetchData, 10000);
+        const interval = setInterval(fetchData, 15000);
         return () => clearInterval(interval);
     }, []);
 
@@ -69,6 +72,44 @@ const Dashboard = () => {
 
     return (
         <div className="dashboard animate-fade-in">
+            {/* Moneycontrol Ticker Tape Marquee */}
+            <div className="ticker-tape-container" style={{
+                background: '#0d131f', 
+                borderBottom: '1px solid rgba(255, 255, 255, 0.06)', 
+                padding: '12px 0', 
+                overflow: 'hidden', 
+                whiteSpace: 'nowrap',
+                position: 'relative',
+                margin: '-32px -32px 24px -32px',
+                zIndex: 50
+            }}>
+                <div className="ticker-tape-track" style={{
+                    display: 'inline-block',
+                    paddingLeft: '10%',
+                    animation: 'marquee 40s linear infinite',
+                    color: '#fff',
+                    fontSize: '11px',
+                    fontWeight: 'bold',
+                    fontFamily: 'var(--font-mono)'
+                }}>
+                    <style>{`
+                        @keyframes marquee {
+                            0% { transform: translate3d(0, 0, 0); }
+                            100% { transform: translate3d(-50%, 0, 0); }
+                        }
+                    `}</style>
+                    {indices.concat(indices).concat(indices).map((idx, i) => (
+                        <span key={i} style={{ margin: '0 25px', display: 'inline-block' }}>
+                            <span style={{ color: '#94a3b8', marginRight: '6px' }}>{idx.symbol}:</span>
+                            <span style={{ color: '#fff', marginRight: '6px' }}>₹{idx.price.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+                            <span style={{ color: idx.percent_change >= 0 ? '#10b981' : '#ef4444' }}>
+                                {idx.percent_change >= 0 ? '▲ +' : '▼ '}{idx.percent_change.toFixed(2)}%
+                            </span>
+                        </span>
+                    ))}
+                </div>
+            </div>
+
             <header className="page-header">
                 <div>
                     <h1>Terminal Alpha</h1>
@@ -97,8 +138,6 @@ const Dashboard = () => {
                     </div>
                 ))}
             </div>
-
-
 
             <div className="stats-grid">
                 <StatCard 
@@ -196,25 +235,34 @@ const Dashboard = () => {
                         </div>
                     </section>
 
+                    {/* Moneycontrol Style Macro News Stream Feed */}
                     <section className="live-positions-summary card animate-slide-right delay-100">
-                        <h3 className="section-title">Open Exposure</h3>
-                        {positions.length > 0 ? (
-                            <div className="mini-positions">
-                                {positions.slice(0, 3).map(pos => (
-                                    <div key={pos.id} className="mini-pos-item">
-                                        <div className="left">
-                                            <div className="sym">{pos.symbol}</div>
-                                            <div className="type">{pos.position_type} x{pos.quantity}</div>
+                        <h3 className="section-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <Activity size={16} color="#ef4444" /> Live Market Intel Feed
+                        </h3>
+                        <div className="news-feed-list" style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '280px', overflowY: 'auto' }}>
+                            {macroNews.length > 0 ? macroNews.map((item, index) => {
+                                const sentiment = item.sentiment?.toUpperCase() || 'NEUTRAL';
+                                const sentimentColor = sentiment === 'BULLISH' ? '#10b981' : sentiment === 'BEARISH' ? '#ef4444' : '#94a3b8';
+                                return (
+                                    <div key={index} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '10px' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px', marginBottom: '4px' }}>
+                                            <span style={{ fontSize: '9px', fontWeight: 'bold', padding: '2px 6px', borderRadius: '4px', background: `${sentimentColor}15`, color: sentimentColor }}>
+                                                {sentiment}
+                                            </span>
+                                            <span style={{ fontSize: '9px', color: 'var(--text-muted)' }}>
+                                                {item.source || 'NewsAPI'}
+                                            </span>
                                         </div>
-                                        <div className={`right ${pos.unrealized_pnl >= 0 ? 'text-profit' : 'text-loss'}`}>
-                                            ₹{pos.unrealized_pnl.toFixed(2)}
-                                        </div>
+                                        <a href={item.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-primary)', textDecoration: 'none', lineHeight: '1.4', display: '-webkit-box', WebkitLineClamp: '2', WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                                            {item.title}
+                                        </a>
                                     </div>
-                                ))}
-                            </div>
-                        ) : (
-                            <div className="empty-state">No open exposure</div>
-                        )}
+                                );
+                            }) : (
+                                <div className="empty-state">No live news streams available.</div>
+                            )}
+                        </div>
                     </section>
                 </div>
             </div>
