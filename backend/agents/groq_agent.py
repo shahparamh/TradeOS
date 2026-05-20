@@ -61,7 +61,7 @@ async def query_groq(payload: str, system_prompt: str = SYSTEM_PROMPT) -> dict:
                 {"role": "user", "content": payload},
             ],
             "temperature": 0.3,
-            "max_tokens": 500,
+            "max_tokens": 1000,
         }
 
         try:
@@ -116,7 +116,19 @@ async def query_groq(payload: str, system_prompt: str = SYSTEM_PROMPT) -> dict:
             
     # If all keys failed or exhausted
     latency_ms = int((time.time() - start_time) * 1000)
-    logger.error("All Groq API keys have been exhausted or failed.")
+    logger.error("All Groq API keys have been exhausted or failed. Auto-deactivating Groq agent in the database.")
+    try:
+        from database.connection import SessionLocal
+        from database.models import Agent
+        db = SessionLocal()
+        agent_db = db.query(Agent).filter(Agent.provider == "groq").first()
+        if agent_db and agent_db.is_active:
+            agent_db.is_active = False
+            db.commit()
+            logger.info("Successfully auto-deactivated agent Groq-Llama in the database.")
+    except Exception as db_ex:
+        logger.error(f"Error auto-deactivating Groq agent in database: {db_ex}")
+        
     return {
         "agent": "Groq-Llama",
         "provider": "groq",
@@ -127,3 +139,4 @@ async def query_groq(payload: str, system_prompt: str = SYSTEM_PROMPT) -> dict:
         "latency_ms": latency_ms,
         "raw_response": "All keys failed.",
     }
+

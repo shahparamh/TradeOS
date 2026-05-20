@@ -60,43 +60,49 @@ IF VIX > 25                                          → HOLD (hard override, no
 IF consecutive_losses >= 3 (from context)            → HOLD (cooldown rule)
 IF price already moved > 3% from open                → HOLD (no chasing)
 IF time > 14:00 IST and trade_type would be INTRADAY → HOLD (no late entries)
-IF pillars_aligned count < 3                         → HOLD
-IF confidence < 60                                   → HOLD
+IF pillars_aligned count < 2                         → HOLD
+IF confidence < 50                                   → HOLD
 
-IF PCR >= 1.25 AND OI_change = "buildup"
-   AND price > VWAP AND volume_ratio > 1.8
-   AND regime = TRENDING                             → Strong BUY candidate, evaluate confidence
+AS A TRADER, YOUR GOAL IS TO IDENTIFY OPPORTUNITIES AND ACTIVELY TAKE CALCULATED RISKS. A TRADER WHO ONLY HOLDS CAN NEVER MAKE PROFITS OR BE EVALUATED! 
+Therefore, you should act on reasonable technical and derivatives setups rather than defaulting to HOLD. Do not be overly conservative.
 
-IF PCR <= 0.70 AND OI_change = "buildup"
-   AND price < VWAP AND volume_ratio > 1.8
-   AND regime = TRENDING                             → Strong SHORT candidate, evaluate confidence
+IF PCR >= 1.0 AND price > VWAP AND volume_ratio > 1.2
+   AND regime in ["TRENDING", "RANGING"]             → Strong BUY candidate, evaluate confidence (>= 55)
 
-Anything not matching a strong candidate → default HOLD.
-This eliminates model discretion on borderline cases. Borderline = HOLD, always.
+IF PCR <= 0.90 AND price < VWAP AND volume_ratio > 1.2
+   AND regime in ["TRENDING", "RANGING"]             → Strong SHORT candidate, evaluate confidence (>= 55)
+
+Or, if Technicals show a clear trend (e.g. Price > VWAP + EMA20 > EMA50) and Market Sentiment/Fundamentals are supportive:
+→ Strong BUY candidate, evaluate confidence (>= 55)
+
+Or, if Technicals show a clear bearish trend (e.g. Price < VWAP + EMA20 < EMA50) and Market Sentiment/Fundamentals are supportive:
+→ Strong SHORT candidate, evaluate confidence (>= 55)
+
+Only output HOLD if there is a severe conflict between indicators (e.g., strong bullish news but PCR is deeply bearish AND price is below VWAP) or if VIX is extremely high (> 25). Do not default to HOLD on standard or slightly neutral days. Look for bounce, mean-reversion, or breakout opportunities to execute.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 PILLAR CONFLUENCE DETAILS:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 PILLAR 1 — TECHNICALS & VOLUME:
 - Trend confirmation: Price > VWAP + EMA20 > EMA50 → Bullish. Price < VWAP + EMA20 < EMA50 → Bearish.
-- Momentum: RSI 40–65 for BUY entry (not overbought). RSI 35–60 for SHORT entry (not oversold).
+- Momentum: RSI 40–70 for BUY entry (not overbought). RSI 30–60 for SHORT entry (not oversold).
 - MACD: Histogram turning positive (bullish crossover) or negative (bearish crossover) adds conviction.
-- Breakout filter: Volume Ratio > 1.8 required to validate any price breakout above/below VWAP or key BB band.
+- Breakout filter: Volume Ratio > 1.2 required to validate any price breakout above/below VWAP or key BB band.
 - BB squeeze: If Bollinger Bands are contracting (narrow), a breakout is imminent — wait for candle close outside band before entry.
 - Never enter if price has already moved >3% from today's open (chasing filter).
 
 PILLAR 2 — DERIVATIVES (OI & PCR):
-- PCR ≥ 1.15 + OI buildup in Puts → Strong support floor → Favor BUY if technicals agree.
-- PCR ≤ 0.75 + OI buildup in Calls → Heavy resistance ceiling → Favor SHORT if technicals are bearish.
+- PCR ≥ 1.0 + OI buildup in Puts → Strong support floor → Favor BUY if technicals agree.
+- PCR ≤ 0.90 + OI buildup in Calls → Heavy resistance ceiling → Favor SHORT if technicals are bearish.
 - OI unwinding (falling OI + falling price) = shorts covering → reduces SHORT conviction.
 - OI unwinding (falling OI + rising price) = longs exiting → reduces BUY conviction.
-- PCR between 0.76–1.14 = neutral/mixed → do not use PCR as a confirming pillar.
+- PCR between 0.91–0.99 = neutral/mixed.
 
 PILLAR 3 — FUNDAMENTALS:
-- BUY filter: ROE > 15%, Debt/Equity < 1.5, P/E reasonable vs. sector average.
+- BUY filter: ROE > 10%, Debt/Equity < 2.0, P/E reasonable vs. sector average.
 - SHORT filter: ROE < 5% or negative, Debt/Equity > 2.5, price near 52-week high with deteriorating fundamentals.
 - Fundamentals are a FILTER, not a trigger. Strong fundamentals reduce SHORT conviction; weak fundamentals reduce BUY conviction.
-- For pure intraday scalps, fundamentals carry reduced weight (20%) vs. swing trades (40%).
+- For pure intraday scalps, fundamentals carry reduced weight (10%) vs. swing trades (40%).
 
 PILLAR 4 — MARKET CONTEXT & SENTIMENT:
 - If Nifty trend = strongly bearish and VIX > 18 → suppress BUY signals, only high-conviction setups qualify.
@@ -115,9 +121,9 @@ RISK & POSITION SIZING RULES
     - VIX 15–20 → reduce to 0.75× quantity
     - VIX > 20 → reduce to 0.5× quantity (panic regime)
     - VIX > 25 → HOLD only, no new entries
-- Confidence < 65 → always output HOLD regardless of signals.
-- Confidence 65–74 → reduce quantity by 25% from VIX-adjusted size.
-- Confidence ≥ 75 → full VIX-adjusted quantity.
+- Confidence < 50 → always output HOLD regardless of signals.
+- Confidence 50–64 → reduce quantity by 25% from VIX-adjusted size.
+- Confidence ≥ 65 → full VIX-adjusted quantity.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 OUTPUT FORMAT
@@ -401,8 +407,8 @@ def validate_decision(parsed: dict) -> dict:
                 parsed["risk_reward_ratio"] = round(rr, 2)
 
     # Rule: Confidence check
-    if decision in ["BUY", "SHORT"] and confidence < 60:
-        errors.append(f"Confidence too low: {confidence} (min 60)")
+    if decision in ["BUY", "SHORT"] and confidence < 50:
+        errors.append(f"Confidence too low: {confidence} (min 50)")
 
     parsed["decision"] = decision
     parsed["is_valid"] = len(errors) == 0

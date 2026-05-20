@@ -50,6 +50,7 @@ export const agentAPI = {
     getById: (id) => api.get(`/agents/${id}`),
     getAgentTrades: (id) => api.get(`/agents/${id}/trades`),
     triggerScan: (agentId, symbol) => api.post(`/agents/${agentId}/scan/${symbol}`),
+    toggleStatus: (id) => api.post(`/agents/${id}/toggle`),
 };
 
 export const brokerAPI = {

@@ -42,6 +42,8 @@ def seed_db():
     default_agents = [
         Agent(name="Gemini", model_name=settings.GEMINI_MODEL, provider="google", cash_balance=settings.INITIAL_CAPITAL, total_pnl=0.0),
         Agent(name="Groq-Llama", model_name="llama-3.3-70b", provider="groq", cash_balance=settings.INITIAL_CAPITAL, total_pnl=0.0),
+        Agent(name="GitHub Model", model_name=settings.GITHUB_MODEL, provider="github", cash_balance=settings.INITIAL_CAPITAL, total_pnl=0.0),
+        Agent(name="HuggingFace Model", model_name=settings.HF_MODEL, provider="huggingface", cash_balance=settings.INITIAL_CAPITAL, total_pnl=0.0),
         Agent(name="DeepSeek-R1", model_name="deepseek-reasoning", provider="deepseek", cash_balance=settings.INITIAL_CAPITAL, total_pnl=0.0),
         Agent(name="Local-Ollama", model_name="llama3.2", provider="ollama", cash_balance=settings.INITIAL_CAPITAL, total_pnl=0.0)
     ]
@@ -95,8 +97,30 @@ def seed_db():
             existing.numeric_value = n_val
             existing.description = desc
             
+    # Auto-reactivate agents if their API keys are configured and available (not exhausted/empty)
+    all_agents = db.query(Agent).all()
+    for agent in all_agents:
+        has_key = False
+        if agent.provider == "google":
+            has_key = bool(settings.GEMINI_API_KEY or settings.GEMINI_API_KEYS)
+        elif agent.provider == "groq":
+            has_key = bool(settings.GROQ_API_KEY or settings.GROQ_API_KEYS)
+        elif agent.provider == "github":
+            has_key = bool(settings.GITHUB_API_KEY)
+        elif agent.provider == "huggingface":
+            has_key = bool(settings.HF_API_KEY)
+        elif agent.provider == "deepseek":
+            has_key = bool(settings.DEEPSEEK_API_KEY)
+        elif agent.provider == "ollama":
+            has_key = True  # Local Ollama doesn't need an external API key
+            
+        if has_key and not agent.is_active:
+            agent.is_active = True
+            print(f"Auto-reactivated agent '{agent.name}' (provider: {agent.provider}) as API key is configured.")
+            
     db.commit()
     db.close()
+
 
 
 seed_db()

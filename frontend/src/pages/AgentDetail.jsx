@@ -27,6 +27,17 @@ const AgentDetail = () => {
         fetchData();
     }, [agentId]);
 
+    const handleToggleStatus = async () => {
+        try {
+            const res = await agentAPI.toggleStatus(agentId);
+            if (res.data.status === 'success') {
+                setAgent(prev => ({ ...prev, is_active: res.data.is_active }));
+            }
+        } catch (err) {
+            console.error('Error toggling agent status', err);
+        }
+    };
+
     if (loading) return <div className="page-loading"><span>Loading agent profile...</span></div>;
     if (!agent) return <div className="page-loading"><span>Agent not found.</span></div>;
 
@@ -35,6 +46,8 @@ const AgentDetail = () => {
         'gemini': 'var(--color-gemini)',
         'groq': 'var(--color-groq)',
         'chatgpt': 'var(--color-chatgpt)',
+        'github': 'var(--color-github)',
+        'huggingface': 'var(--color-huggingface)',
     };
     const colorKey = agent.name.toLowerCase().split('-')[0];
     const agentColor = colorMap[colorKey] || 'var(--accent-blue)';
@@ -60,6 +73,25 @@ const AgentDetail = () => {
                             <span className={`status-chip ${agent.is_active ? 'active' : 'inactive'}`}>
                                 {agent.is_active ? '● Active' : '● Paused'}
                             </span>
+                            <button 
+                                onClick={handleToggleStatus} 
+                                className={`btn-toggle-status ${agent.is_active ? 'pause' : 'resume'}`}
+                                style={{
+                                    marginLeft: '12px',
+                                    padding: '4px 10px',
+                                    fontSize: '11px',
+                                    fontWeight: '700',
+                                    borderRadius: '6px',
+                                    cursor: 'pointer',
+                                    border: '1px solid',
+                                    transition: 'all 0.2s',
+                                    background: agent.is_active ? 'rgba(239, 68, 68, 0.08)' : 'rgba(16, 185, 129, 0.08)',
+                                    color: agent.is_active ? '#ef4444' : '#10b981',
+                                    borderColor: agent.is_active ? 'rgba(239, 68, 68, 0.2)' : 'rgba(16, 185, 129, 0.2)',
+                                }}
+                            >
+                                {agent.is_active ? 'Pause Agent' : 'Resume Agent'}
+                            </button>
                         </div>
                         <p className="aph-model">{agent.model_name} • {agent.provider}</p>
                     </div>

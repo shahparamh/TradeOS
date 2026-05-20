@@ -8,6 +8,8 @@ import json
 from datetime import datetime
 from agents.gemini_agent import query_gemini
 from agents.groq_agent import query_groq
+from agents.github_agent import query_github
+from agents.huggingface_agent import query_huggingface
 from agents.prompts import build_ai_payload
 from database.connection import SessionLocal
 from database.models import Agent, AIResponse
@@ -28,6 +30,10 @@ async def query_agent_pipeline(agent, payload_dict: dict, opportunity: dict) -> 
             decision = await query_gemini(payload_str)
         elif agent.provider == "groq":
             decision = await query_groq(payload_str)
+        elif agent.provider == "github":
+            decision = await query_github(payload_str)
+        elif agent.provider == "huggingface":
+            decision = await query_huggingface(payload_str)
         elif agent.provider == "ollama":
             import os
             if os.getenv("RENDER"):
@@ -79,6 +85,10 @@ RESPONSE FORMAT (strict JSON):
                 critique = await query_gemini(objection_prompt)
             elif agent.provider == "groq":
                 critique = await query_groq(objection_prompt)
+            elif agent.provider == "github":
+                critique = await query_github(objection_prompt)
+            elif agent.provider == "huggingface":
+                critique = await query_huggingface(objection_prompt)
             elif agent.provider == "ollama":
                 critique = await query_ollama(objection_prompt)
                 

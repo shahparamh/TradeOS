@@ -102,3 +102,20 @@ async def trigger_agent_scan(agent_id: int, symbol: str, db: Session = Depends(g
 
     decisions = await execute_all_agents(market_context, opportunity, [])
     return {"status": "success", "symbol": symbol, "decisions": decisions}
+
+
+@router.post("/{agent_id}/toggle")
+def toggle_agent_status(agent_id: int, db: Session = Depends(get_db)):
+    """Manually toggle an agent's active status."""
+    agent = db.query(Agent).get(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    agent.is_active = not agent.is_active
+    db.commit()
+    return {
+        "status": "success",
+        "is_active": agent.is_active,
+        "message": f"Agent {agent.name} is now {'active' if agent.is_active else 'paused'}."
+    }
+

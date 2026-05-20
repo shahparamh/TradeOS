@@ -249,6 +249,8 @@ class TradingScheduler:
             # Importing agent clients dynamically to avoid circular references
             from agents.gemini_agent import query_gemini
             from agents.groq_agent import query_groq
+            from agents.github_agent import query_github
+            from agents.huggingface_agent import query_huggingface
             from agents.ollama_agent import query_ollama
             
             for symbol in symbols:
@@ -280,7 +282,10 @@ class TradingScheduler:
                             decision_data = await query_gemini(payload_str, system_prompt=PRE_MARKET_SYSTEM_PROMPT)
                         elif agent.provider == "groq":
                             decision_data = await query_groq(payload_str, system_prompt=PRE_MARKET_SYSTEM_PROMPT)
-
+                        elif agent.provider == "github":
+                            decision_data = await query_github(payload_str, system_prompt=PRE_MARKET_SYSTEM_PROMPT)
+                        elif agent.provider == "huggingface":
+                            decision_data = await query_huggingface(payload_str, system_prompt=PRE_MARKET_SYSTEM_PROMPT)
                         elif agent.provider == "ollama":
                             import os
                             if os.getenv("RENDER"):

@@ -58,7 +58,7 @@ async def query_gemini(payload: str, system_prompt: str = SYSTEM_PROMPT) -> dict
                 payload,
                 generation_config=genai.types.GenerationConfig(
                     temperature=0.3,
-                    max_output_tokens=500,
+                    max_output_tokens=1000,
                 ),
             )
 

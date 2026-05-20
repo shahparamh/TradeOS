@@ -1,19 +1,17 @@
 # Watchlist — Liquid NSE stocks for initial simulation
 WATCHLIST = [
-    "^NSEI",
-    "^NSEBANK",
-    "ANANTRAJ.NS",
-    "RCF.NS",
+    "RELIANCE.NS",
+    "HDFCBANK.NS",
+    "ICICIBANK.NS",
     "SBIN.NS",
-    "PGEL.NS",
-    "TECHM.NS",
-    "LTM.NS",
-    "BHARTIARTL.NS",
-    "HFCL.NS",
     "INFY.NS",
+    "TCS.NS",
     "HCLTECH.NS",
-    "BSE.NS",
+    "WIPRO.NS",
+    "SUNPHARMA.NS",
+    "CIPLA.NS",
 ]
+
 
 # Indian market indices
 NIFTY_50 = "^NSEI"
@@ -25,4 +23,4 @@ MARKET_OPEN = "09:15"
 MARKET_CLOSE = "15:30"
 
 # AI Agent names
-AGENT_NAMES = ["Gemini", "Groq-Llama", "Local-Ollama"]
+AGENT_NAMES = ["Gemini", "Groq-Llama", "GitHub Model", "HuggingFace Model", "Local-Ollama"]
