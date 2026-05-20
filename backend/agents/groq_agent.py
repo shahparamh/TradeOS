@@ -16,6 +16,10 @@ logger = setup_logger("agent_groq")
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 
+async def query_groq(payload: str, system_prompt: str = SYSTEM_PROMPT) -> dict:
+    """
+    Sends market data payload to Groq and returns parsed trading decision.
+    """
     api_key = api_key_manager.get_key("groq")
     if not api_key:
         logger.error("All Groq API Keys are exhausted or missing!")
@@ -29,9 +33,9 @@ GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
             "latency_ms": 0,
             "raw_response": "Missing or exhausted API Keys",
         }
-        
+
     start_time = time.time()
-    
+
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {api_key}",
@@ -49,7 +53,7 @@ GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
     try:
         api_key_manager.record_usage("groq", api_key)
-        
+
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(GROQ_API_URL, headers=headers, json=body)
 
@@ -69,12 +73,12 @@ GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
                 "latency_ms": latency_ms,
                 "raw_response": "Rate limit",
             }
-            
+
         if response.status_code != 200:
             error_text = response.text
             masked_key = api_key[:6] + "..." + api_key[-4:] if len(api_key) > 10 else "unknown"
             logger.error(f"Groq API key {masked_key} failed (status {response.status_code}): {error_text}")
-            
+
             return {
                 "agent": "Groq-Llama",
                 "provider": "groq",
@@ -101,7 +105,7 @@ GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
     except Exception as e:
         logger.warning(f"Exception using Groq key: {str(e)}")
-            
+
     # If all keys failed or exhausted
     latency_ms = int((time.time() - start_time) * 1000)
     logger.error("All Groq API keys have been exhausted or failed. Auto-deactivating Groq agent in the database.")
@@ -116,7 +120,7 @@ GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
             logger.info("Successfully auto-deactivated agent Groq-Llama in the database.")
     except Exception as db_ex:
         logger.error(f"Error auto-deactivating Groq agent in database: {db_ex}")
-        
+
     return {
         "agent": "Groq-Llama",
         "provider": "groq",
