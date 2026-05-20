@@ -313,9 +313,7 @@ class RiskManager:
             
         now = get_ist_now()
         if not is_market_open():
-             # For manual testing, we might want to bypass this
-             # return {"passed": False, "reason": "Market is closed"}
-             return {"passed": True} # Bypassing for now to allow testing
+             return {"passed": False, "reason": "Market is closed"}
 
         if (now.hour == 15 and now.minute >= 15) or now.hour > 15:
             return {"passed": False, "reason": "Too late for new trades (after 3:15 PM)"}

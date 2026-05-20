@@ -18,6 +18,7 @@ class TradingScheduler:
     def __init__(self):
         self.scheduler = AsyncIOScheduler(timezone="Asia/Kolkata")
         self.is_running_cycle = False
+        self.cycle_start_time = None
 
     def start(self):
         """Starts the scheduler and registers jobs."""
@@ -81,17 +82,22 @@ class TradingScheduler:
     async def run_trading_cycle(self, ignore_hours: bool = False):
         """Executes the full trading pipeline."""
         if self.is_running_cycle:
-            logger.warning("Cycle already in progress, skipping...")
-            return
+            if self.cycle_start_time and (datetime.now() - self.cycle_start_time).total_seconds() > 300:
+                logger.warning("Previous cycle timed out (5 mins exceeded). Forcing new cycle.")
+                self.is_running_cycle = False
+            else:
+                logger.warning("Cycle already in progress, skipping...")
+                return
             
         from datetime import datetime, timezone, timedelta
         ist = timezone(timedelta(hours=5, minutes=30))
         now = datetime.now(ist)
         
         if not ignore_hours:
-            # 1. Market Days Check (0=Mon, 4=Fri)
-            if now.weekday() > 4:
-                logger.info("Market is closed (Weekend). Skipping trading cycle to save API keys.")
+            # 1. Market Days & Holiday Check
+            from utils.market_calendar import is_market_holiday
+            if is_market_holiday(now.date()):
+                logger.info("Market is closed (Weekend or Holiday). Skipping trading cycle to save API keys.")
                 return
                 
             # 2. Market Hours Check (9:15 AM to 3:15 PM)
@@ -103,6 +109,7 @@ class TradingScheduler:
                 return
             
         self.is_running_cycle = True
+        self.cycle_start_time = datetime.now()
         db = SessionLocal()
         logger.info("=== TRADING CYCLE START ===")
         
@@ -139,6 +146,15 @@ class TradingScheduler:
                     
                     indicators = generate_indicator_summary(calculate_all_indicators(candles_df), symbol)
                     
+                    # PRE-FILTER 1: Simple Technical Noise Filter
+                    rsi = indicators.get("rsi", 50.0)
+                    vol_ratio = indicators.get("volume_ratio", 1.0)
+                    pattern = indicators.get("candlestick_pattern", "None")
+                    
+                    if not ignore_hours and (40 <= rsi <= 60) and vol_ratio < 1.5 and pattern == "None":
+                        logger.info(f"Skipping {symbol} - Pure noise (RSI: {rsi}, Vol: {vol_ratio}).")
+                        continue
+                    
                     # Fetch stock-specific fundamental metrics (P/E, ROE, 52W High/Low, Sector)
                     from data.fundamentals_fetcher import fetch_yf_fundamentals
                     fundamentals = fetch_yf_fundamentals(symbol)
@@ -146,15 +162,6 @@ class TradingScheduler:
                     # Fetch Derivatives Option Chain Open Interest (OI) & PCR (Put-Call Ratio)
                     from data.market_fetcher import fetch_option_oi_metrics
                     oi_metrics = fetch_option_oi_metrics(symbol)
-                    
-                    opportunity = {
-                        "symbol": symbol,
-                        "signal_type": "AUTOMATIC_SCAN",
-                        "indicators": indicators,
-                        "fundamentals": fundamentals,
-                        "derivatives_oi": oi_metrics,
-                        "ignore_hours": ignore_hours
-                    }
                     
                     # Dynamic news fetch if enabled in system rules
                     from database.models import SystemRule
@@ -168,6 +175,27 @@ class TradingScheduler:
                             news_payload = fetch_all_news_for_stock(symbol) or []
                         except Exception as e:
                             logger.error(f"Failed to fetch news for {symbol}: {e}")
+                            
+                    # PRE-FILTER 2: Full Opportunity Scanner
+                    from scanner.opportunity_scanner import OpportunityScanner
+                    scanner = OpportunityScanner()
+                    opps = scanner.scan_all([indicators], {symbol: news_payload}, {symbol: fundamentals})
+                    
+                    if not ignore_hours and not opps:
+                        logger.info(f"Skipping {symbol} - No scanner opportunities found.")
+                        continue
+                        
+                    scanner_signals = [o["signal_type"] for o in opps] if opps else []
+                    
+                    opportunity = {
+                        "symbol": symbol,
+                        "signal_type": "AUTOMATIC_SCAN",
+                        "scanner_signals": scanner_signals,
+                        "indicators": indicators,
+                        "fundamentals": fundamentals,
+                        "derivatives_oi": oi_metrics,
+                        "ignore_hours": ignore_hours
+                    }
                     
                     # Logic inside execute_all_agents handles calling AIs and executing trades via VirtualBroker
                     await execute_all_agents(market_context, opportunity, news_payload)
@@ -295,6 +323,9 @@ class TradingScheduler:
                             decision_data = await query_github(payload_str, system_prompt=PRE_MARKET_SYSTEM_PROMPT)
                         elif agent.provider == "huggingface":
                             decision_data = await query_huggingface(payload_str, system_prompt=PRE_MARKET_SYSTEM_PROMPT)
+                        elif agent.provider == "deepseek":
+                            from agents.deepseek_agent import query_deepseek
+                            decision_data = await query_deepseek(payload_str, system_prompt=PRE_MARKET_SYSTEM_PROMPT)
                         elif agent.provider == "ollama":
                             import os
                             if os.getenv("RENDER"):

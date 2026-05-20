@@ -172,3 +172,17 @@ class SystemRule(Base):
     description = Column(String(250))
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+
+class APIUsageLog(Base):
+    """Tracks per-key API usage for all external providers."""
+    __tablename__ = "api_usage_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    provider = Column(String(50), nullable=False, index=True)   # e.g. "gemini", "groq", "newsapi"
+    key_hash = Column(String(32), nullable=False)               # First 16 chars of SHA-256 hash
+    requests_today = Column(Integer, default=0)
+    tokens_used = Column(Integer, default=0, nullable=True)
+    last_reset = Column(DateTime, default=datetime.utcnow)
+    is_exhausted = Column(Boolean, default=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+

@@ -8,87 +8,73 @@ import google.generativeai as genai
 from config import settings
 from agents.prompts import SYSTEM_PROMPT, parse_ai_response
 from utils.logger import setup_logger
+from utils.api_manager import api_key_manager
 
 logger = setup_logger("agent_gemini")
-
-# Keep track of the active working key index at the module level
-_current_key_index = 0
 
 async def query_gemini(payload: str, system_prompt: str = SYSTEM_PROMPT) -> dict:
     """
     Sends market data payload to Gemini and returns a parsed trading decision.
     Uses stateful API key rotation to bypass rate limits gracefully.
     """
-    global _current_key_index
-    keys = [k.strip() for k in settings.GEMINI_API_KEYS if k and k.strip()]
-    if not keys:
-        keys = [k.strip() for k in [settings.GEMINI_API_KEY] if k and k.strip()]
-        
-    if not keys:
-        logger.error("No valid Gemini API Keys found!")
+    api_key = api_key_manager.get_key("gemini")
+    if not api_key:
+        logger.error("All Gemini API Keys are exhausted or missing!")
         return {
             "agent": "Gemini",
             "provider": "google",
             "decision": "HOLD",
             "confidence": 0,
-            "reasoning": "Gemini API Key not provided. Please add GEMINI_API_KEY in your backend/.env file.",
+            "reasoning": "Gemini API Keys exhausted.",
             "is_valid": False,
             "latency_ms": 0,
-            "raw_response": "Missing API Keys",
+            "raw_response": "Missing or exhausted API Keys",
         }
         
     start_time = time.time()
-    num_keys = len(keys)
     
-    # Try all keys starting from our last known working key index
-    for attempt in range(num_keys):
-        current_idx = (_current_key_index + attempt) % num_keys
-        api_key = keys[current_idx]
+    try:
+        genai.configure(api_key=api_key)
         
-        try:
-            # Dynamically configure the Gemini SDK with the active key
-            genai.configure(api_key=api_key)
-            
-            model = genai.GenerativeModel(
-                model_name=settings.GEMINI_MODEL,
-                system_instruction=system_prompt,
-            )
+        # Log usage BEFORE making the call (optimistic tracking)
+        api_key_manager.record_usage("gemini", api_key)
+        
+        model = genai.GenerativeModel(
+            model_name=settings.GEMINI_MODEL,
+            system_instruction=system_prompt,
+        )
 
-            response = model.generate_content(
-                payload,
-                generation_config=genai.types.GenerationConfig(
-                    temperature=0.3,
-                    max_output_tokens=1000,
-                ),
-            )
+        response = model.generate_content(
+            payload,
+            generation_config=genai.types.GenerationConfig(
+                temperature=0.3,
+                max_output_tokens=1000,
+            ),
+        )
 
-            raw_text = response.text
-            latency_ms = int((time.time() - start_time) * 1000)
+        raw_text = response.text
+        latency_ms = int((time.time() - start_time) * 1000)
+        
+        logger.info(f"Gemini responded in {latency_ms}ms")
 
-            # Success! Save the index of the working key!
-            _current_key_index = current_idx
-            
-            logger.info(f"Gemini responded in {latency_ms}ms (using key index {current_idx})")
+        parsed = parse_ai_response(raw_text)
+        parsed["agent"] = "Gemini"
+        parsed["provider"] = "google"
+        parsed["latency_ms"] = latency_ms
+        parsed["raw_response"] = raw_text
 
-            parsed = parse_ai_response(raw_text)
-            parsed["agent"] = "Gemini"
-            parsed["provider"] = "google"
-            parsed["latency_ms"] = latency_ms
-            parsed["raw_response"] = raw_text
+        return parsed
 
-            return parsed
-
-        except Exception as e:
-            err_msg = str(e)
-            masked_key = api_key[:6] + "..." + api_key[-4:] if len(api_key) > 10 else "unknown"
-            
-            # Check for Rate Limit / Quota errors
-            if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg or "quota" in err_msg.lower():
-                logger.warning(f"Gemini API key {masked_key} rate-limited/exhausted. Trying next key...")
-                continue
-                
+    except Exception as e:
+        err_msg = str(e)
+        masked_key = api_key[:6] + "..." + api_key[-4:] if len(api_key) > 10 else "unknown"
+        
+        if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg or "quota" in err_msg.lower():
+            logger.warning(f"Gemini API key {masked_key} rate-limited/exhausted.")
+            api_key_manager.mark_exhausted("gemini", api_key)
+        else:
             logger.error(f"Gemini API key {masked_key} error: {err_msg}")
-            continue
+
 
     # If all keys failed or exhausted
     latency_ms = int((time.time() - start_time) * 1000)

@@ -14,6 +14,7 @@ from api.routes_broker import router as broker_router
 from api.routes_auth import router as auth_router
 from api.routes_settings import router as settings_router
 from scheduler.trading_loop import TradingScheduler
+from utils.api_manager import initialize_api_manager
 
 # Initialize scheduler
 trading_scheduler = TradingScheduler()
@@ -126,6 +127,9 @@ def seed_db():
 
 seed_db()
 
+# Initialize centralized API key manager with all configured keys
+initialize_api_manager()
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: Start the scheduler
@@ -154,6 +158,11 @@ app.add_middleware(
 @app.get("/api/health")
 def health_check():
     return {"status": "alive", "platform": "TradeOS"}
+
+# Root endpoint for platform health checks (Render, etc.)
+@app.get("/")
+def read_root():
+    return {"status": "TradeOS Backend is running"}
 
 # Scheduler Controls
 @app.get("/api/scheduler/status")

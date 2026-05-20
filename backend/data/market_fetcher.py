@@ -4,35 +4,12 @@ import time
 from utils.logger import setup_logger
 from utils.rate_limiter import rate_limited_call
 
+from utils.cache import ttl_cache
+
 logger = setup_logger("market_fetcher")
 
-# Caching structures
-_live_price_cache = {}
-CACHE_TTL_SECONDS = 120
-
-_index_data_cache = {
-    "data": None,
-    "timestamp": 0.0
-}
-INDEX_CACHE_TTL = 120
-
-_market_regime_cache = {
-    "data": None,
-    "timestamp": 0.0
-}
-REGIME_CACHE_TTL = 300
-
-_option_oi_cache = {}
-OI_CACHE_TTL = 1800  # 30 minutes
-
+@ttl_cache(seconds=120)
 def fetch_live_price(symbol: str) -> dict:
-    current_time = time.time()
-    
-    # Return from cache if fresh
-    if symbol in _live_price_cache:
-        cached_data, cached_time = _live_price_cache[symbol]
-        if current_time - cached_time < CACHE_TTL_SECONDS:
-            return cached_data
 
     try:
         ticker = yf.Ticker(symbol)
@@ -74,15 +51,9 @@ def fetch_live_price(symbol: str) -> dict:
             "percent_change": change_pct,
             "change_pct": change_pct,  # keep backward compat
         }
-        
-        _live_price_cache[symbol] = (res, current_time)
         return res
     except Exception as e:
         logger.error(f"Error fetching live price for {symbol}: {str(e)}")
-        # Dynamic fallback to cache if available
-        if symbol in _live_price_cache:
-            logger.info(f"Using stale cached price for {symbol} due to API error.")
-            return _live_price_cache[symbol][0]
         return {"symbol": symbol, "price": 0, "change": 0, "percent_change": 0}
 
 def fetch_intraday_candles(symbol: str, interval: str = "5m", period: str = "5d") -> pd.DataFrame:
@@ -104,14 +75,8 @@ def fetch_historical_data(symbol: str, period: str = "6mo", interval: str = "1d"
         logger.error(f"Error fetching historical data for {symbol}: {str(e)}")
         return pd.DataFrame()
 
+@ttl_cache(seconds=60)
 def fetch_index_data() -> dict:
-    current_time = time.time()
-    
-    # Return from cache if fresh
-    if _index_data_cache["data"] is not None:
-        if current_time - _index_data_cache["timestamp"] < INDEX_CACHE_TTL:
-            return _index_data_cache["data"]
-
     try:
         nifty_data = rate_limited_call(
             lambda: {
@@ -165,16 +130,9 @@ def fetch_index_data() -> dict:
                 "status": vix_status
             }
         ]
-        
-        _index_data_cache["data"] = res
-        _index_data_cache["timestamp"] = current_time
         return res
     except Exception as e:
         logger.error(f"Error fetching index data: {str(e)}")
-        # Fallback to cache if available
-        if _index_data_cache["data"] is not None:
-            logger.info("Using stale cached index data due to API error")
-            return _index_data_cache["data"]
         return []
  
 def fetch_bulk_prices(symbols: list) -> dict:
@@ -204,23 +162,14 @@ def fetch_bulk_prices(symbols: list) -> dict:
         logger.error(f"Error fetching bulk prices: {str(e)}")
         return {}
 
+@ttl_cache(seconds=900)
 def fetch_option_oi_metrics(symbol: str) -> dict:
     """Fetches option chain Open Interest from the nearest monthly expiry to compute Put-Call Ratio (PCR)."""
-    current_time = time.time()
-    
-    # Check cache
-    if symbol in _option_oi_cache:
-        cached_data, cached_time = _option_oi_cache[symbol]
-        if current_time - cached_time < OI_CACHE_TTL:
-            return cached_data
-            
     try:
         ticker = yf.Ticker(symbol)
         expiries = rate_limited_call(lambda: ticker.options)
         if not expiries:
-            res = {"oi_pcr": 1.0, "total_call_oi": 0, "total_put_oi": 0, "oi_sentiment": "NEUTRAL"}
-            _option_oi_cache[symbol] = (res, current_time)
-            return res
+            return {"oi_pcr": 1.0, "total_call_oi": 0, "total_put_oi": 0, "oi_sentiment": "NEUTRAL"}
             
         # Target the nearest expiry (usually represents 90% of open interest)
         opt = rate_limited_call(ticker.option_chain, expiries[0])
@@ -249,15 +198,9 @@ def fetch_option_oi_metrics(symbol: str) -> dict:
             "total_put_oi": total_put_oi,
             "oi_sentiment": sentiment
         }
-        
-        _option_oi_cache[symbol] = (res, current_time)
         return res
     except Exception as e:
         logger.warning(f"Option OI chain fetch bypassed or not available for {symbol}: {e}")
-        # Fallback to stale cache if available
-        if symbol in _option_oi_cache:
-            logger.info(f"Using stale cached Option OI metrics for {symbol} due to API error")
-            return _option_oi_cache[symbol][0]
             
         return {
             "oi_pcr": 1.0,
@@ -267,11 +210,18 @@ def fetch_option_oi_metrics(symbol: str) -> dict:
         }
 
 
+def _fetch_fii_dii_data() -> tuple[float, float]:
+    """
+    Fetches live FII/DII data. Currently returns stubs. 
+    To be replaced with actual scraping logic from NSE/Moneycontrol.
+    """
+    return 1450.0, -210.0
+
+@ttl_cache(seconds=900)
 def fetch_option_greeks_and_fii(symbol: str) -> dict:
     """Calculates Black-Scholes ATM call/put options delta & gamma, and seeds institutional FII/DII parameters."""
     try:
-        fii_net = 1450.0  # ₹1450 Crores net daily buying
-        dii_net = -210.0  # ₹-210 Crores net daily selling
+        fii_net, dii_net = _fetch_fii_dii_data()
         
         ticker = yf.Ticker(symbol)
         price = rate_limited_call(lambda: ticker.fast_info.last_price)
@@ -291,13 +241,29 @@ def fetch_option_greeks_and_fii(symbol: str) -> dict:
         call_delta = min(0.99, max(0.01, call_delta))
         put_delta = call_delta - 1.0
         
+        # Calculate actual days to earnings
+        days_to_earnings = 90
+        try:
+            calendar = rate_limited_call(lambda: ticker.calendar)
+            if calendar is not None and not calendar.empty and 'Earnings Date' in calendar.index:
+                # yfinance calendar returns a dictionary/series often with 'Earnings Date' as index containing list of dates
+                earnings_dates = calendar.loc['Earnings Date']
+                if isinstance(earnings_dates, list) and len(earnings_dates) > 0:
+                    import datetime
+                    next_earning = earnings_dates[0].date()
+                    delta = (next_earning - datetime.date.today()).days
+                    if delta >= 0:
+                        days_to_earnings = delta
+        except Exception as e:
+            logger.warning(f"Could not calculate earnings date for {symbol}: {e}")
+        
         return {
             "atm_call_delta": round(call_delta, 2),
             "atm_put_delta": round(put_delta, 2),
             "atm_gamma": round(gamma, 4),
             "fii_net_buying_cr": fii_net,
             "dii_net_buying_cr": dii_net,
-            "days_to_earnings": 5
+            "days_to_earnings": days_to_earnings
         }
     except Exception as e:
         logger.warning(f"Could not calculate option greeks for {symbol}: {e}")
@@ -307,18 +273,12 @@ def fetch_option_greeks_and_fii(symbol: str) -> dict:
             "atm_gamma": 0.002,
             "fii_net_buying_cr": 1200.0,
             "dii_net_buying_cr": -350.0,
-            "days_to_earnings": 12
+            "days_to_earnings": 90
         }
 
+@ttl_cache(seconds=300)
 def calculate_market_regime() -> dict:
     """Detects Nifty 50 range contraction or directional trends over the last 3 sessions (Layer 1)."""
-    current_time = time.time()
-    
-    # Check cache
-    if _market_regime_cache["data"] is not None:
-        if current_time - _market_regime_cache["timestamp"] < REGIME_CACHE_TTL:
-            return _market_regime_cache["data"]
-            
     try:
         nifty = yf.Ticker("^NSEI")
         hist = rate_limited_call(nifty.history, period="5d", interval="1d")
@@ -369,16 +329,9 @@ def calculate_market_regime() -> dict:
             "reasoning": reason,
             "vix": round(vix_val, 2)
         }
-        
-        _market_regime_cache["data"] = res
-        _market_regime_cache["timestamp"] = current_time
         return res
     except Exception as e:
         logger.warning(f"Failed to calculate market regime: {e}")
-        # Fallback to stale cache
-        if _market_regime_cache["data"] is not None:
-            logger.info("Using stale cached market regime due to API error")
-            return _market_regime_cache["data"]
             
         return {
             "regime": "NORMAL",

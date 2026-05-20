@@ -10,6 +10,7 @@ from agents.gemini_agent import query_gemini
 from agents.groq_agent import query_groq
 from agents.github_agent import query_github
 from agents.huggingface_agent import query_huggingface
+from agents.deepseek_agent import query_deepseek
 from agents.prompts import build_ai_payload
 from database.connection import SessionLocal
 from database.models import Agent, AIResponse
@@ -34,6 +35,8 @@ async def query_agent_pipeline(agent, payload_dict: dict, opportunity: dict) -> 
             decision = await query_github(payload_str)
         elif agent.provider == "huggingface":
             decision = await query_huggingface(payload_str)
+        elif agent.provider == "deepseek":
+            decision = await query_deepseek(payload_str)
         elif agent.provider == "ollama":
             import os
             if os.getenv("RENDER"):
@@ -56,7 +59,7 @@ async def query_agent_pipeline(agent, payload_dict: dict, opportunity: dict) -> 
     })
     
     # 2. CALL 2: Devil's Advocate (Multi-Model Validation - Layer 5)
-    if decision.get("decision") in ["BUY", "SHORT"] and decision.get("confidence", 0) >= 65:
+    if decision.get("decision") in ["BUY", "SHORT"] and decision.get("confidence", 0) >= 75:
         logger.info(f"Initiating Devil's Advocate check for {agent.name} on {opportunity.get('symbol')}...")
         objection_prompt = f"""You are the Devil's Advocate for TradeOS.
 Your sole job is to criticize the following proposed trade decision and find every reason it could fail.
@@ -101,6 +104,8 @@ RESPONSE FORMAT (strict JSON):
                 critique = await query_github(objection_prompt)
             elif agent.provider == "huggingface":
                 critique = await query_huggingface(objection_prompt)
+            elif agent.provider == "deepseek":
+                critique = await query_deepseek(objection_prompt)
             elif agent.provider == "ollama":
                 critique = await query_ollama(objection_prompt)
                 
@@ -242,6 +247,7 @@ async def execute_all_agents(
             decision["agent_id"] = agent_id
             decision["agent"] = agent_name
             decision["ignore_hours"] = ignore_hours
+            decision["symbol"] = opportunity.get("symbol")
 
 
             # Save AI response
@@ -260,18 +266,29 @@ async def execute_all_agents(
             # --- EXECUTION LOGIC ---
             if execute_trades and decision.get("decision") in ["BUY", "SHORT"]:
                 agent = db.query(Agent).get(agent_id)
+                
+                current_price = opportunity.get("indicators", {}).get("price")
+                if not current_price:
+                    # Defensive Fallback: fetch live price
+                    from data.market_fetcher import fetch_live_price
+                    try:
+                        current_price = fetch_live_price(opportunity["symbol"]).get("price")
+                    except Exception:
+                        current_price = decision.get("entry_price")
+
+                # Stale price check (2% deviation)
+                ai_price = decision.get("entry_price", current_price)
+                if current_price and ai_price and abs(ai_price - current_price) / current_price > 0.02:
+                    logger.warning(f"Trade REJECTED for {agent_name}: AI entry price {ai_price} deviates > 2% from market price {current_price}.")
+                    continue
+                    
+                # Fix F&O quantities / lot multiples
+                qty = int(decision.get("quantity", 1))
+                decision["quantity"] = qty
+                
                 # Risk Validation
                 risk_res = risk_manager.validate_trade(decision, agent_states[agent.name])
                 if risk_res["approved"]:
-                    current_price = opportunity.get("indicators", {}).get("price")
-                    if not current_price:
-                        # Defensive Fallback: fetch live price
-                        from data.market_fetcher import fetch_live_price
-                        try:
-                            current_price = fetch_live_price(opportunity["symbol"]).get("price")
-                        except Exception:
-                            current_price = decision.get("entry_price")
-
                     trade_type = decision.get("trade_type", "INTRADAY")
                     position_type = decision.get("position_type", "LONG" if decision["decision"] == "BUY" else "SHORT")
                     if decision["decision"] == "BUY":
