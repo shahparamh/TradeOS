@@ -1,13 +1,29 @@
 import yfinance as yf
 import pandas as pd
+import time
 from utils.logger import setup_logger
+from utils.rate_limiter import rate_limited_call
 
 logger = setup_logger("market_fetcher")
 
-import time
-
+# Caching structures
 _live_price_cache = {}
-CACHE_TTL_SECONDS = 60
+CACHE_TTL_SECONDS = 120
+
+_index_data_cache = {
+    "data": None,
+    "timestamp": 0.0
+}
+INDEX_CACHE_TTL = 120
+
+_market_regime_cache = {
+    "data": None,
+    "timestamp": 0.0
+}
+REGIME_CACHE_TTL = 300
+
+_option_oi_cache = {}
+OI_CACHE_TTL = 1800  # 30 minutes
 
 def fetch_live_price(symbol: str) -> dict:
     current_time = time.time()
@@ -20,11 +36,21 @@ def fetch_live_price(symbol: str) -> dict:
 
     try:
         ticker = yf.Ticker(symbol)
-        info = ticker.fast_info
+        # Fetching all required fields from fast_info inside a single rate-limited call
+        info_data = rate_limited_call(
+            lambda t: {
+                "last_price": t.fast_info.last_price,
+                "previous_close": t.fast_info.previous_close,
+                "open": t.fast_info.open,
+                "day_high": t.fast_info.day_high,
+                "day_low": t.fast_info.day_low,
+                "last_volume": t.fast_info.last_volume,
+            },
+            ticker
+        )
         
-        # fast_info provides real-time data faster than .info
-        current_price = info.last_price
-        prev_close = info.previous_close
+        current_price = info_data.get("last_price")
+        prev_close = info_data.get("previous_close")
         
         # Guard against None values
         if current_price is None or pd.isna(current_price) or current_price == 0:
@@ -39,10 +65,10 @@ def fetch_live_price(symbol: str) -> dict:
         res = {
             "symbol": symbol,
             "price": round(current_price, 2),
-            "open": round(info.open, 2) if info.open else None,
-            "high": round(info.day_high, 2) if info.day_high else None,
-            "low": round(info.day_low, 2) if info.day_low else None,
-            "volume": int(info.last_volume) if info.last_volume else 0,
+            "open": round(info_data.get("open"), 2) if info_data.get("open") else None,
+            "high": round(info_data.get("day_high"), 2) if info_data.get("day_high") else None,
+            "low": round(info_data.get("day_low"), 2) if info_data.get("day_low") else None,
+            "volume": int(info_data.get("last_volume")) if info_data.get("last_volume") else 0,
             "prev_close": round(prev_close, 2) if prev_close else None,
             "change": change,
             "percent_change": change_pct,
@@ -63,7 +89,7 @@ def fetch_intraday_candles(symbol: str, interval: str = "5m", period: str = "5d"
     try:
         ticker = yf.Ticker(symbol)
         # yfinance limits 5m data to 60 days
-        df = ticker.history(period=period, interval=interval)
+        df = rate_limited_call(ticker.history, period=period, interval=interval)
         return df
     except Exception as e:
         logger.error(f"Error fetching intraday candles for {symbol}: {str(e)}")
@@ -72,42 +98,63 @@ def fetch_intraday_candles(symbol: str, interval: str = "5m", period: str = "5d"
 def fetch_historical_data(symbol: str, period: str = "6mo", interval: str = "1d") -> pd.DataFrame:
     try:
         ticker = yf.Ticker(symbol)
-        df = ticker.history(period=period, interval=interval)
+        df = rate_limited_call(ticker.history, period=period, interval=interval)
         return df
     except Exception as e:
         logger.error(f"Error fetching historical data for {symbol}: {str(e)}")
         return pd.DataFrame()
 
 def fetch_index_data() -> dict:
+    current_time = time.time()
+    
+    # Return from cache if fresh
+    if _index_data_cache["data"] is not None:
+        if current_time - _index_data_cache["timestamp"] < INDEX_CACHE_TTL:
+            return _index_data_cache["data"]
+
     try:
-        nifty = yf.Ticker("^NSEI").fast_info
-        sensex = yf.Ticker("^BSESN").fast_info
+        nifty_data = rate_limited_call(
+            lambda: {
+                "last_price": yf.Ticker("^NSEI").fast_info.last_price,
+                "previous_close": yf.Ticker("^NSEI").fast_info.previous_close
+            }
+        )
+        sensex_data = rate_limited_call(
+            lambda: {
+                "last_price": yf.Ticker("^BSESN").fast_info.last_price,
+                "previous_close": yf.Ticker("^BSESN").fast_info.previous_close
+            }
+        )
         
         vix_val = 14.5 # Standard defensive default
         try:
-            vix = yf.Ticker("^INDIAVIX").fast_info
-            raw_vix = vix.last_price
+            raw_vix = rate_limited_call(lambda: yf.Ticker("^INDIAVIX").fast_info.last_price)
             if raw_vix is not None and not pd.isna(raw_vix) and raw_vix > 0:
                 vix_val = raw_vix
         except Exception:
             pass
         
-        n_change = ((nifty.last_price - nifty.previous_close) / nifty.previous_close) * 100
-        s_change = ((sensex.last_price - sensex.previous_close) / sensex.previous_close) * 100
+        nifty_price = nifty_data.get("last_price")
+        nifty_prev = nifty_data.get("previous_close")
+        sensex_price = sensex_data.get("last_price")
+        sensex_prev = sensex_data.get("previous_close")
+        
+        n_change = ((nifty_price - nifty_prev) / nifty_prev) * 100 if nifty_prev else 0
+        s_change = ((sensex_price - sensex_prev) / sensex_prev) * 100 if sensex_prev else 0
         
         vix_status = "low" if vix_val < 15 else "moderate" if vix_val <= 20 else "high"
         
-        return [
+        res = [
             {
                 "symbol": "Nifty 50",
-                "price": round(nifty.last_price, 2),
-                "change": round(nifty.last_price - nifty.previous_close, 2),
+                "price": round(nifty_price, 2) if nifty_price else 0,
+                "change": round(nifty_price - nifty_prev, 2) if nifty_price and nifty_prev else 0,
                 "percent_change": round(n_change, 2)
             },
             {
                 "symbol": "Sensex",
-                "price": round(sensex.last_price, 2),
-                "change": round(sensex.last_price - sensex.previous_close, 2),
+                "price": round(sensex_price, 2) if sensex_price else 0,
+                "change": round(sensex_price - sensex_prev, 2) if sensex_price and sensex_prev else 0,
                 "percent_change": round(s_change, 2)
             },
             {
@@ -118,14 +165,22 @@ def fetch_index_data() -> dict:
                 "status": vix_status
             }
         ]
+        
+        _index_data_cache["data"] = res
+        _index_data_cache["timestamp"] = current_time
+        return res
     except Exception as e:
         logger.error(f"Error fetching index data: {str(e)}")
+        # Fallback to cache if available
+        if _index_data_cache["data"] is not None:
+            logger.info("Using stale cached index data due to API error")
+            return _index_data_cache["data"]
         return []
  
 def fetch_bulk_prices(symbols: list) -> dict:
     try:
         # Batch download
-        data = yf.download(symbols, period="1d", interval="1d", group_by="ticker", progress=False)
+        data = rate_limited_call(yf.download, symbols, period="1d", interval="1d", group_by="ticker", progress=False)
         results = {}
         for symbol in symbols:
             try:
@@ -151,14 +206,24 @@ def fetch_bulk_prices(symbols: list) -> dict:
 
 def fetch_option_oi_metrics(symbol: str) -> dict:
     """Fetches option chain Open Interest from the nearest monthly expiry to compute Put-Call Ratio (PCR)."""
+    current_time = time.time()
+    
+    # Check cache
+    if symbol in _option_oi_cache:
+        cached_data, cached_time = _option_oi_cache[symbol]
+        if current_time - cached_time < OI_CACHE_TTL:
+            return cached_data
+            
     try:
         ticker = yf.Ticker(symbol)
-        expiries = ticker.options
+        expiries = rate_limited_call(lambda: ticker.options)
         if not expiries:
-            return {"oi_pcr": 1.0, "total_call_oi": 0, "total_put_oi": 0, "oi_sentiment": "NEUTRAL"}
+            res = {"oi_pcr": 1.0, "total_call_oi": 0, "total_put_oi": 0, "oi_sentiment": "NEUTRAL"}
+            _option_oi_cache[symbol] = (res, current_time)
+            return res
             
         # Target the nearest expiry (usually represents 90% of open interest)
-        opt = ticker.option_chain(expiries[0])
+        opt = rate_limited_call(ticker.option_chain, expiries[0])
         calls = opt.calls
         puts = opt.puts
         
@@ -178,14 +243,22 @@ def fetch_option_oi_metrics(symbol: str) -> dict:
         else:
             sentiment = "NEUTRAL"
             
-        return {
+        res = {
             "oi_pcr": oi_pcr,
             "total_call_oi": total_call_oi,
             "total_put_oi": total_put_oi,
             "oi_sentiment": sentiment
         }
+        
+        _option_oi_cache[symbol] = (res, current_time)
+        return res
     except Exception as e:
         logger.warning(f"Option OI chain fetch bypassed or not available for {symbol}: {e}")
+        # Fallback to stale cache if available
+        if symbol in _option_oi_cache:
+            logger.info(f"Using stale cached Option OI metrics for {symbol} due to API error")
+            return _option_oi_cache[symbol][0]
+            
         return {
             "oi_pcr": 1.0,
             "total_call_oi": 0,
@@ -201,9 +274,9 @@ def fetch_option_greeks_and_fii(symbol: str) -> dict:
         dii_net = -210.0  # ₹-210 Crores net daily selling
         
         ticker = yf.Ticker(symbol)
-        price = ticker.fast_info.last_price
+        price = rate_limited_call(lambda: ticker.fast_info.last_price)
         
-        hist = ticker.history(period="5d")
+        hist = rate_limited_call(ticker.history, period="5d")
         if not hist.empty:
             returns = hist["Close"].pct_change().dropna()
             vol = float(returns.std() * (252 ** 0.5)) if len(returns) > 0 else 0.25
@@ -211,10 +284,10 @@ def fetch_option_greeks_and_fii(symbol: str) -> dict:
             vol = 0.25
             
         time_to_expiry = 30 / 365 # 30 days to monthly expiry
-        denom = price * vol * (time_to_expiry ** 0.5)
+        denom = price * vol * (time_to_expiry ** 0.5) if price else 0
         gamma = 1 / (denom * (2 * 3.14159) ** 0.5) if denom > 0 else 0.002
         
-        call_delta = 0.50 + (0.02 * (price - hist["Close"].mean()) / price if not hist.empty else 0)
+        call_delta = 0.50 + (0.02 * (price - hist["Close"].mean()) / price if price and not hist.empty else 0)
         call_delta = min(0.99, max(0.01, call_delta))
         put_delta = call_delta - 1.0
         
@@ -239,14 +312,20 @@ def fetch_option_greeks_and_fii(symbol: str) -> dict:
 
 def calculate_market_regime() -> dict:
     """Detects Nifty 50 range contraction or directional trends over the last 3 sessions (Layer 1)."""
+    current_time = time.time()
+    
+    # Check cache
+    if _market_regime_cache["data"] is not None:
+        if current_time - _market_regime_cache["timestamp"] < REGIME_CACHE_TTL:
+            return _market_regime_cache["data"]
+            
     try:
         nifty = yf.Ticker("^NSEI")
-        hist = nifty.history(period="5d", interval="1d")
+        hist = rate_limited_call(nifty.history, period="5d", interval="1d")
         
         vix_val = 14.5
         try:
-            vix = yf.Ticker("^INDIAVIX").fast_info
-            raw_vix = vix.last_price
+            raw_vix = rate_limited_call(lambda: yf.Ticker("^INDIAVIX").fast_info.last_price)
             if raw_vix is not None and not pd.isna(raw_vix) and raw_vix > 0:
                 vix_val = raw_vix
         except Exception:
@@ -284,14 +363,23 @@ def calculate_market_regime() -> dict:
             strategy = "ALL_STRATEGIES_VALID"
             reason = "Insufficient history."
             
-        return {
+        res = {
             "regime": regime,
             "recommended_strategy": strategy,
             "reasoning": reason,
             "vix": round(vix_val, 2)
         }
+        
+        _market_regime_cache["data"] = res
+        _market_regime_cache["timestamp"] = current_time
+        return res
     except Exception as e:
         logger.warning(f"Failed to calculate market regime: {e}")
+        # Fallback to stale cache
+        if _market_regime_cache["data"] is not None:
+            logger.info("Using stale cached market regime due to API error")
+            return _market_regime_cache["data"]
+            
         return {
             "regime": "NORMAL",
             "recommended_strategy": "ALL_STRATEGIES_VALID",

@@ -61,6 +61,9 @@ async def aggregate_market_context() -> dict:
 
 async def aggregate_all_watchlist() -> list:
     logger.info(f"Aggregating data for {len(WATCHLIST)} stocks...")
-    tasks = [aggregate_stock_data(symbol) for symbol in WATCHLIST]
-    results = await asyncio.gather(*tasks)
+    results = []
+    for symbol in WATCHLIST:
+        res = await aggregate_stock_data(symbol)
+        results.append(res)
+        await asyncio.sleep(2)
     return results
