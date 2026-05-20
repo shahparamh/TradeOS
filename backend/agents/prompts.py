@@ -115,6 +115,14 @@ RISK & POSITION SIZING RULES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 - Stop-loss = 1.5× ATR from entry (hard rule). Must be within 2% of entry.
 - Target must yield minimum 1:1.5 risk-reward. Prefer 1:2 or better.
+- Target and Stop-Loss Orientation (CRITICAL):
+    - For a BUY decision:
+        - Target price MUST be strictly GREATER than entry price (Target >= Entry * 1.01).
+        - Stop-loss price MUST be strictly LESS than entry price (Stop Loss <= Entry * 0.99).
+    - For a SHORT decision:
+        - Target price MUST be strictly LESS than entry price (Target <= Entry * 0.99).
+        - Stop-loss price MUST be strictly GREATER than entry price (Stop Loss >= Entry * 1.01).
+    - Swapping these values is a severe logic error and will invalidate the trade immediately!
 - Base quantity = floor(max_trade_capital / entry_price), where max_trade_capital = 50% of available cash.
 - VIX scaling:
     - VIX < 15 → full quantity (1.0×)

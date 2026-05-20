@@ -85,7 +85,8 @@ def seed_db():
         ("entry_start_hour", "float", None, 9.25, "Allowed entry start hour (e.g., 9.25 for 9:15 AM)"),
         ("entry_end_hour", "float", None, 15.0, "Allowed entry end hour (e.g., 15.0 for 3:00 PM)"),
         ("enable_fno_trading", "boolean", True, None, "Toggle Futures & Options (F&O) accessibility for AI models"),
-        ("starting_capital_per_agent", "float", None, 5000000.0, "Starting balance per AI agent upon platform reset")
+        ("starting_capital_per_agent", "float", None, 5000000.0, "Starting balance per AI agent upon platform reset"),
+        ("devils_advocate_veto_threshold", "float", None, 8.0, "Devil's Advocate disagreement threshold to veto trades (0.0-10.0)")
     ]
     for key, val_type, b_val, n_val, desc in rules_to_seed:
         existing = db.query(SystemRule).filter(SystemRule.key == key).first()

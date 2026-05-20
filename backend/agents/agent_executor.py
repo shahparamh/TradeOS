@@ -79,6 +79,18 @@ RESPONSE FORMAT (strict JSON):
     "objections": ["<objection 1>", "<objection 2>"]
 }}
 """
+        from database.models import SystemRule
+        da_db = SessionLocal()
+        threshold = 8.0
+        try:
+            rule = da_db.query(SystemRule).filter(SystemRule.key == "devils_advocate_veto_threshold").first()
+            if rule and rule.numeric_value is not None:
+                threshold = float(rule.numeric_value)
+        except Exception as dbe:
+            logger.warning(f"Failed to query devils_advocate_veto_threshold: {dbe}")
+        finally:
+            da_db.close()
+
         try:
             critique = {"disagreement_score": 0, "objections": []}
             if agent.provider == "google":
@@ -96,8 +108,8 @@ RESPONSE FORMAT (strict JSON):
             objections = critique.get("objections", []) if isinstance(critique, dict) else []
             
             logger.info(f"Devil's Advocate Disagreement Score for {agent.name}: {score}/10")
-            if score >= 6:
-                logger.warning(f"Devil's Advocate OVERRIDE for {agent.name} due to score {score} >= 6. Objections: {objections}")
+            if score >= threshold:
+                logger.warning(f"Devil's Advocate OVERRIDE for {agent.name} due to score {score} >= {threshold}. Objections: {objections}")
                 decision["decision"] = "HOLD"
                 decision["confidence"] = 40
                 decision["reasoning"] = f"OVERRULED by Devil's Advocate (Disagreement {score}/10): " + "; ".join(objections)

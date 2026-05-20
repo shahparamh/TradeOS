@@ -116,60 +116,75 @@ class TradingScheduler:
             # 3. Watchlist symbols (Loaded dynamically from constants)
             symbols = WATCHLIST
             
-            for symbol in symbols:
-                # Cooldown check: Skip stocks analyzed in the last 15 minutes unless ignore_hours is set
-                from datetime import datetime, timedelta
-                five_mins_ago = datetime.utcnow() - timedelta(minutes=15)
-                recent_scan = db.query(AIResponse).filter(
-                    AIResponse.symbol == symbol,
-                    AIResponse.created_at >= five_mins_ago
-                ).first()
-                
-                if not ignore_hours and recent_scan:
-                    logger.info(f"Skipping {symbol} scan - recently analyzed in the last 15 minutes.")
-                    continue
-                    
-                logger.info(f"Scanning {symbol}...")
-                candles_df = fetch_intraday_candles(symbol, "5m", "5d")
-                if candles_df.empty: continue
-                
-                indicators = generate_indicator_summary(calculate_all_indicators(candles_df), symbol)
-                
-                # Fetch stock-specific fundamental metrics (P/E, ROE, 52W High/Low, Sector)
-                from data.fundamentals_fetcher import fetch_yf_fundamentals
-                fundamentals = fetch_yf_fundamentals(symbol)
-                
-                # Fetch Derivatives Option Chain Open Interest (OI) & PCR (Put-Call Ratio)
-                from data.market_fetcher import fetch_option_oi_metrics
-                oi_metrics = fetch_option_oi_metrics(symbol)
-                
-                opportunity = {
-                    "symbol": symbol,
-                    "signal_type": "AUTOMATIC_SCAN",
-                    "indicators": indicators,
-                    "fundamentals": fundamentals,
-                    "derivatives_oi": oi_metrics,
-                    "ignore_hours": ignore_hours
-                }
-                
-                # Dynamic news fetch if enabled in system rules
-                from database.models import SystemRule
-                enable_news = db.query(SystemRule).filter(SystemRule.key == "enable_news_sentiment").first()
-                enable_news_bool = enable_news.bool_value if enable_news else True
-                
-                news_payload = []
-                if enable_news_bool:
+            # Semaphore to limit concurrent stock scanning (e.g. 3) to prevent rate limits
+            sem = asyncio.Semaphore(3)
+            
+            async def scan_single_symbol(symbol, s_sem):
+                async with s_sem:
+                    local_db = SessionLocal()
                     try:
-                        from data.news_fetcher import fetch_all_news_for_stock
-                        news_payload = fetch_all_news_for_stock(symbol) or []
-                    except Exception as e:
-                        logger.error(f"Failed to fetch news for {symbol}: {e}")
-                
-                # Logic inside execute_all_agents handles calling AIs and executing trades via VirtualBroker
-                await execute_all_agents(market_context, opportunity, news_payload)
-                
-                # Small sleep to be kind to APIs
-                await asyncio.sleep(10)
+                        # Cooldown check: Skip stocks analyzed in the last 15 minutes unless ignore_hours is set
+                        from datetime import datetime, timedelta
+                        five_mins_ago = datetime.utcnow() - timedelta(minutes=15)
+                        recent_scan = local_db.query(AIResponse).filter(
+                            AIResponse.symbol == symbol,
+                            AIResponse.created_at >= five_mins_ago
+                        ).first()
+                        
+                        if not ignore_hours and recent_scan:
+                            logger.info(f"Skipping {symbol} scan - recently analyzed in the last 15 minutes.")
+                            return
+                            
+                        logger.info(f"Scanning {symbol}...")
+                        candles_df = fetch_intraday_candles(symbol, "5m", "5d")
+                        if candles_df.empty:
+                            return
+                        
+                        indicators = generate_indicator_summary(calculate_all_indicators(candles_df), symbol)
+                        
+                        # Fetch stock-specific fundamental metrics (P/E, ROE, 52W High/Low, Sector)
+                        from data.fundamentals_fetcher import fetch_yf_fundamentals
+                        fundamentals = fetch_yf_fundamentals(symbol)
+                        
+                        # Fetch Derivatives Option Chain Open Interest (OI) & PCR (Put-Call Ratio)
+                        from data.market_fetcher import fetch_option_oi_metrics
+                        oi_metrics = fetch_option_oi_metrics(symbol)
+                        
+                        opportunity = {
+                            "symbol": symbol,
+                            "signal_type": "AUTOMATIC_SCAN",
+                            "indicators": indicators,
+                            "fundamentals": fundamentals,
+                            "derivatives_oi": oi_metrics,
+                            "ignore_hours": ignore_hours
+                        }
+                        
+                        # Dynamic news fetch if enabled in system rules
+                        from database.models import SystemRule
+                        enable_news = local_db.query(SystemRule).filter(SystemRule.key == "enable_news_sentiment").first()
+                        enable_news_bool = enable_news.bool_value if enable_news else True
+                        
+                        news_payload = []
+                        if enable_news_bool:
+                            try:
+                                from data.news_fetcher import fetch_all_news_for_stock
+                                news_payload = fetch_all_news_for_stock(symbol) or []
+                            except Exception as e:
+                                logger.error(f"Failed to fetch news for {symbol}: {e}")
+                        
+                        # Logic inside execute_all_agents handles calling AIs and executing trades via VirtualBroker
+                        await execute_all_agents(market_context, opportunity, news_payload)
+                        
+                        # Soft spacing between requests within the semaphore
+                        await asyncio.sleep(2)
+                        
+                    except Exception as inner_ex:
+                        logger.error(f"Failed to process scan for {symbol}: {inner_ex}")
+                    finally:
+                        local_db.close()
+
+            tasks = [scan_single_symbol(symbol, sem) for symbol in symbols]
+            await asyncio.gather(*tasks, return_exceptions=True)
                 
         except Exception as e:
             logger.error(f"Trading cycle error: {e}")

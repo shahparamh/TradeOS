@@ -375,7 +375,18 @@ class RiskManager:
         if not entry or not target:
             return {"passed": True}
             
-        profit_pct = (target - entry) / entry
+        decision_direction = str(decision.get("decision", "BUY")).upper()
+        position_type = str(decision.get("position_type", "LONG")).upper()
+        
+        is_bullish = True
+        if decision_direction == "SHORT" or position_type in ["SHORT", "BUY_PE", "SELL_CE"]:
+            is_bullish = False
+            
+        if is_bullish:
+            profit_pct = (target - entry) / entry
+        else:
+            profit_pct = (entry - target) / entry
+            
         if profit_pct < min_profit_pct:
             return {
                 "passed": False,
