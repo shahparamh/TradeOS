@@ -1,14 +1,14 @@
-from fastapi import Router, HTTPException
+from fastapi import APIRouter, HTTPException
 from database.connection import SessionLocal
 from database.models import Agent
 from datetime import datetime
 import logging
 
-router = Router()
+router = APIRouter(prefix="/health", tags=["Health Check"])
 logger = logging.getLogger(__name__)
 
 
-@router.get("/health")
+@router.get("")
 def health_check():
     """
     Basic health check endpoint.
@@ -22,7 +22,7 @@ def health_check():
     }
 
 
-@router.get("/health/detailed")
+@router.get("/detailed")
 def detailed_health_check():
     """
     Detailed health check including database and scheduler status.
@@ -52,7 +52,7 @@ def detailed_health_check():
         )
 
 
-@router.get("/health/scheduler")
+@router.get("/scheduler")
 def scheduler_health_check():
     """
     Check the status of the trading scheduler.
@@ -87,7 +87,7 @@ def scheduler_health_check():
         )
 
 
-@router.get("/health/ready")
+@router.get("/ready")
 def readiness_check():
     """
     Kubernetes-style readiness probe.
@@ -108,7 +108,7 @@ def readiness_check():
         )
 
 
-@router.get("/health/live")
+@router.get("/live")
 def liveness_check():
     """
     Kubernetes-style liveness probe.
