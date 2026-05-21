@@ -4,9 +4,12 @@ Uses GitHub's OpenAI-compatible API for ultra-fast inference.
 """
 
 import time
+
 import httpx
+
 from config import settings
 from agents.prompts import SYSTEM_PROMPT, parse_ai_response
+from utils.api_manager import api_key_manager
 from utils.logger import setup_logger
 
 logger = setup_logger("agent_github")
@@ -17,19 +20,18 @@ async def query_github(payload: str, system_prompt: str = SYSTEM_PROMPT) -> dict
     """
     Sends market data payload to GitHub Models (GPT-4o) and returns a parsed trading decision.
     """
-    api_key = settings.GITHUB_API_KEY.strip() if settings.GITHUB_API_KEY else ""
-    
+    api_key = api_key_manager.get_key("github")
     if not api_key:
-        logger.error("No valid GitHub API Key found!")
+        logger.error("All GitHub API keys are exhausted or missing!")
         return {
             "agent": "GitHub Model",
             "provider": "github",
             "decision": "HOLD",
             "confidence": 0,
-            "reasoning": "GitHub API Key not provided. Please add GITHUB_API_KEY in your backend/.env file.",
+            "reasoning": "GitHub API keys exhausted or not provided.",
             "is_valid": False,
             "latency_ms": 0,
-            "raw_response": "Missing API Key",
+            "raw_response": "Missing or exhausted API keys",
         }
         
     start_time = time.time()
@@ -50,6 +52,8 @@ async def query_github(payload: str, system_prompt: str = SYSTEM_PROMPT) -> dict
     }
 
     try:
+        api_key_manager.record_usage("github", api_key)
+
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(GITHUB_API_URL, headers=headers, json=body)
 
@@ -58,12 +62,18 @@ async def query_github(payload: str, system_prompt: str = SYSTEM_PROMPT) -> dict
         # Handle rate-limiting (429) or unauthorized (401/403) or token errors
         if response.status_code in [429, 401, 403]:
             masked_key = api_key[:6] + "..." + api_key[-4:] if len(api_key) > 10 else "unknown"
-            logger.warning(f"GitHub Models API failed with status {response.status_code} using key {masked_key}. Deactivating agent...")
-            raise httpx.HTTPStatusError(
-                f"Rate limit or authorization failure: {response.status_code}",
-                request=response.request,
-                response=response
-            )
+            logger.warning(f"GitHub Models API failed with status {response.status_code} using key {masked_key}. Marking exhausted.")
+            api_key_manager.mark_exhausted("github", api_key)
+            return {
+                "agent": "GitHub Model",
+                "provider": "github",
+                "decision": "HOLD",
+                "confidence": 0,
+                "reasoning": f"GitHub API error {response.status_code}.",
+                "is_valid": False,
+                "latency_ms": latency_ms,
+                "raw_response": response.text,
+            }
             
         if response.status_code != 200:
             error_text = response.text
@@ -97,20 +107,7 @@ async def query_github(payload: str, system_prompt: str = SYSTEM_PROMPT) -> dict
 
     except Exception as e:
         latency_ms = int((time.time() - start_time) * 1000)
-        logger.error(f"GitHub Models API query failed: {str(e)}. Auto-deactivating GitHub agent in the database.")
-        
-        try:
-            from database.connection import SessionLocal
-            from database.models import Agent
-            db = SessionLocal()
-            agent_db = db.query(Agent).filter(Agent.provider == "github").first()
-            if agent_db and agent_db.is_active:
-                agent_db.is_active = False
-                db.commit()
-                logger.info("Successfully auto-deactivated agent GitHub Model in the database.")
-        except Exception as db_ex:
-            logger.error(f"Error auto-deactivating GitHub agent in database: {db_ex}")
-            
+        logger.error(f"GitHub Models API query failed: {str(e)}")
         return {
             "agent": "GitHub Model",
             "provider": "github",

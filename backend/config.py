@@ -43,6 +43,7 @@ class Settings:
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
     GROQ_MODEL: str = "llama-3.3-70b-versatile"  # Free tier on Groq
     OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3.2")
+    GITHUB_API_KEYS: list = [k.strip() for k in os.getenv("GITHUB_API_KEYS", "").split(",") if k.strip()] or [os.getenv("GITHUB_API_KEY", "")]
     GITHUB_API_KEY: str = os.getenv("GITHUB_API_KEY", "")
     GITHUB_MODEL: str = os.getenv("GITHUB_MODEL", "gpt-4o")
     HF_API_KEY: str = os.getenv("HF_API_KEY", "")

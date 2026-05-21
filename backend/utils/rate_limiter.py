@@ -5,7 +5,8 @@ from utils.logger import setup_logger
 logger = setup_logger("rate_limiter")
 
 # Minimum gap in seconds between any two yfinance calls
-MIN_REQUEST_INTERVAL = 1.5
+# Yahoo Finance starts returning 429s below 2.5s; using 3.0s for safety margin
+MIN_REQUEST_INTERVAL = 3.0
 
 _last_request_time = 0.0
 _lock = threading.Lock()

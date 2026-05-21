@@ -162,9 +162,15 @@ def fetch_bulk_prices(symbols: list) -> dict:
         logger.error(f"Error fetching bulk prices: {str(e)}")
         return {}
 
-@ttl_cache(seconds=900)
+
+@ttl_cache(seconds=60)
+def fetch_bulk_prices_cached(symbols: list) -> dict:
+    return fetch_bulk_prices(symbols)
+
+@ttl_cache(seconds=1800)
 def fetch_option_oi_metrics(symbol: str) -> dict:
-    """Fetches option chain Open Interest from the nearest monthly expiry to compute Put-Call Ratio (PCR)."""
+    """Fetches option chain Open Interest from the nearest monthly expiry to compute Put-Call Ratio (PCR).
+    Cached for 30 minutes since OI changes slowly and is expensive to fetch."""
     try:
         ticker = yf.Ticker(symbol)
         expiries = rate_limited_call(lambda: ticker.options)

@@ -22,6 +22,14 @@ class TradingScheduler:
 
     def start(self):
         """Starts the scheduler and registers jobs."""
+        # 0. Daily Fundamentals Refresh - 1:00 AM IST
+        self.scheduler.add_job(
+            self.run_fundamentals_refresh,
+            CronTrigger(hour=1, minute=0, timezone="Asia/Kolkata"),
+            id="daily_fundamentals_refresh",
+            name="Daily Fundamentals Refresh",
+            replace_existing=True
+        )
         # 1. Pre-Market Strategy Planner - At 9:00 AM IST
         self.scheduler.add_job(
             self.run_pre_market_session,
@@ -78,6 +86,14 @@ class TradingScheduler:
             logger.error(f"Monitor cycle error: {e}")
         finally:
             db.close()
+
+    async def run_fundamentals_refresh(self):
+        """Refreshes fundamentals cache once per day during IST night window."""
+        try:
+            from data.fundamentals_fetcher import refresh_daily_fundamentals
+            await asyncio.to_thread(refresh_daily_fundamentals, WATCHLIST)
+        except Exception as e:
+            logger.error(f"Daily fundamentals refresh error: {e}")
 
     async def run_trading_cycle(self, ignore_hours: bool = False):
         """Executes the full trading pipeline."""
@@ -146,13 +162,14 @@ class TradingScheduler:
                     
                     indicators = generate_indicator_summary(calculate_all_indicators(candles_df), symbol)
                     
-                    # PRE-FILTER 1: Simple Technical Noise Filter
+                    # PRE-FILTER 1: Extreme Indecision + Ultra-low Volume Filter
+                    # Only skip if RSI is highly indecisive (45-55) AND volume is extremely low (<1.0x average)
                     rsi = indicators.get("rsi", 50.0)
                     vol_ratio = indicators.get("volume_ratio", 1.0)
                     pattern = indicators.get("candlestick_pattern", "None")
                     
-                    if not ignore_hours and (40 <= rsi <= 60) and vol_ratio < 1.5 and pattern == "None":
-                        logger.info(f"Skipping {symbol} - Pure noise (RSI: {rsi}, Vol: {vol_ratio}).")
+                    if not ignore_hours and (45 <= rsi <= 55) and vol_ratio < 0.8:
+                        logger.info(f"Skipping {symbol} - Extreme indecision (RSI: {rsi}, Vol: {vol_ratio}x).")
                         continue
                     
                     # Fetch stock-specific fundamental metrics (P/E, ROE, 52W High/Low, Sector)
@@ -160,8 +177,11 @@ class TradingScheduler:
                     fundamentals = fetch_yf_fundamentals(symbol)
                     
                     # Fetch Derivatives Option Chain Open Interest (OI) & PCR (Put-Call Ratio)
+                    # If OI fetch fails due to rate limiting, scanner will still work with other indicators
                     from data.market_fetcher import fetch_option_oi_metrics
                     oi_metrics = fetch_option_oi_metrics(symbol)
+                    if not oi_metrics.get("total_call_oi", 0) and not oi_metrics.get("total_put_oi", 0):
+                        logger.debug(f"No OI data for {symbol}—proceeding without derivatives metrics.")
                     
                     # Dynamic news fetch if enabled in system rules
                     from database.models import SystemRule
