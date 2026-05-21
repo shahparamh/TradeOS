@@ -14,6 +14,47 @@ import asyncio
 
 logger = setup_logger("trading_scheduler")
 
+
+def _validate_data_integrity(symbol: str, indicators: dict, fundamentals: dict) -> tuple[bool, str]:
+    """
+    Validates that critical data is present and non-null before sending to agents.
+    Returns (is_valid, reason_if_invalid)
+    """
+    # 1. Check indicators have values
+    critical_indicators = ["rsi", "macd", "volume_ratio", "ema_20", "ema_50", "vwap"]
+    for ind in critical_indicators:
+        val = indicators.get(ind)
+        if val is None or (isinstance(val, float) and val != val):  # NaN check
+            return False, f"Missing or null indicator: {ind}"
+    
+    # 2. Check for reasonable indicator ranges
+    rsi = indicators.get("rsi", 50)
+    if not (0 <= rsi <= 100):
+        return False, f"Invalid RSI value: {rsi}"
+    
+    volume_ratio = indicators.get("volume_ratio", 1.0)
+    if volume_ratio <= 0:
+        return False, f"Invalid volume ratio: {volume_ratio}"
+    
+    # 3. Check price data exists
+    price_related = ["price", "ema_20", "ema_50", "vwap"]
+    for field in price_related:
+        val = indicators.get(field)
+        if val is None or val <= 0:
+            return False, f"Invalid or missing price field: {field}"
+    
+    # 4. Fundamentals can be minimal, but shouldn't be completely empty
+    # (It's okay if market_cap is None, but at least "symbol" should exist)
+    if not fundamentals.get("symbol"):
+        return False, "Fundamentals missing symbol"
+    
+    # 5. Ensure we have at least candlestick pattern
+    pattern = indicators.get("candlestick_pattern")
+    if pattern is None:
+        return False, "Missing candlestick pattern"
+    
+    return True, ""
+
 class TradingScheduler:
     def __init__(self):
         self.scheduler = AsyncIOScheduler(timezone="Asia/Kolkata")
@@ -204,6 +245,13 @@ class TradingScheduler:
                     if not ignore_hours and not opps:
                         logger.info(f"Skipping {symbol} - No scanner opportunities found.")
                         continue
+                    
+                    # PRE-FILTER 3: Data Integrity Validation
+                    # Ensure all critical data is present before sending to AI agents
+                    is_valid, validation_error = _validate_data_integrity(symbol, indicators, fundamentals)
+                    if not is_valid:
+                        logger.warning(f"Skipping {symbol} - Data integrity check failed: {validation_error}")
+                        continue
                         
                     scanner_signals = [o["signal_type"] for o in opps] if opps else []
                     
@@ -220,8 +268,9 @@ class TradingScheduler:
                     # Logic inside execute_all_agents handles calling AIs and executing trades via VirtualBroker
                     await execute_all_agents(market_context, opportunity, news_payload)
                     
-                    # Inter-symbol delay of 5 seconds
-                    await asyncio.sleep(5)
+                    # Inter-symbol delay of 10 seconds to prevent rate limit hammering
+                    # Global rate limiter is 3.0s, but we need breathing room for API response times
+                    await asyncio.sleep(10)
                     
                 except Exception as inner_ex:
                     logger.error(f"Failed to process scan for {symbol}: {inner_ex}")

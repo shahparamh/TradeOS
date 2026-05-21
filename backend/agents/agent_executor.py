@@ -136,6 +136,32 @@ async def execute_all_agents(
     """
     Sends payload to agents and optionally executes trades through Risk/Broker.
     """
+    # Validate critical opportunity data before proceeding
+    symbol = opportunity.get("symbol")
+    indicators = opportunity.get("indicators", {})
+    fundamentals = opportunity.get("fundamentals", {})
+    
+    if not symbol:
+        logger.error("Opportunity missing symbol. Skipping agent execution.")
+        return []
+    
+    if not indicators or len(indicators) < 5:
+        logger.error(f"Opportunity for {symbol} has insufficient indicators. Skipping agent execution.")
+        return []
+    
+    # Check for null/NaN values in critical indicator fields
+    critical_fields = ["rsi", "macd", "volume_ratio", "ema_20", "vwap"]
+    for field in critical_fields:
+        val = indicators.get(field)
+        if val is None or (isinstance(val, float) and val != val):  # NaN check
+            logger.error(f"Opportunity for {symbol} has null/invalid {field}. Skipping agent execution.")
+            return []
+    
+    # Check fundamentals has minimum required structure
+    if not fundamentals or "symbol" not in fundamentals:
+        logger.error(f"Opportunity for {symbol} has invalid fundamentals. Skipping agent execution.")
+        return []
+    
     db = SessionLocal()
     from broker.risk_manager import RiskManager
     from broker.virtual_broker import VirtualBroker

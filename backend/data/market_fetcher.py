@@ -1,12 +1,22 @@
 import yfinance as yf
 import pandas as pd
 import time
+from datetime import time as dt_time
+
+from utils.helpers import get_ist_now
 from utils.logger import setup_logger
 from utils.rate_limiter import rate_limited_call
-
 from utils.cache import ttl_cache
 
 logger = setup_logger("market_fetcher")
+
+def _is_market_hours() -> bool:
+    """Check if current time is within NSE trading hours (9:15 AM - 3:30 PM IST)."""
+    now = get_ist_now()
+    market_start = now.replace(hour=9, minute=15, second=0, microsecond=0)
+    market_end = now.replace(hour=15, minute=30, second=0, microsecond=0)
+    is_weekday = now.weekday() < 5
+    return is_weekday and (market_start <= now <= market_end)
 
 @ttl_cache(seconds=120)
 def fetch_live_price(symbol: str) -> dict:
@@ -167,11 +177,14 @@ def fetch_bulk_prices(symbols: list) -> dict:
 def fetch_bulk_prices_cached(symbols: list) -> dict:
     return fetch_bulk_prices(symbols)
 
-@ttl_cache(seconds=1800)
+@ttl_cache(seconds=86400)
 def fetch_option_oi_metrics(symbol: str) -> dict:
     """Fetches option chain Open Interest from the nearest monthly expiry to compute Put-Call Ratio (PCR).
-    Cached for 30 minutes since OI changes slowly and is expensive to fetch."""
+    Cached for 1 day (86400s) to avoid repeated expensive fetches.
+    If not in cache and needed during market hours, fetches on-demand and caches for day."""
     try:
+        if _is_market_hours():
+            logger.debug(f"On-demand OI fetch for {symbol} during market hours (cache miss).")
         ticker = yf.Ticker(symbol)
         expiries = rate_limited_call(lambda: ticker.options)
         if not expiries:
@@ -223,10 +236,15 @@ def _fetch_fii_dii_data() -> tuple[float, float]:
     """
     return 1450.0, -210.0
 
-@ttl_cache(seconds=900)
+@ttl_cache(seconds=86400)
 def fetch_option_greeks_and_fii(symbol: str) -> dict:
-    """Calculates Black-Scholes ATM call/put options delta & gamma, and seeds institutional FII/DII parameters."""
+    """Calculates Black-Scholes ATM call/put options delta & gamma, and seeds institutional FII/DII parameters.
+    Cached for 1 day (86400s) to avoid repeated expensive fetches.
+    If not in cache and needed during market hours, fetches on-demand and caches for day."""
     try:
+        if _is_market_hours():
+            logger.debug(f"On-demand greeks/fii fetch for {symbol} during market hours (cache miss).")
+        
         fii_net, dii_net = _fetch_fii_dii_data()
         
         ticker = yf.Ticker(symbol)

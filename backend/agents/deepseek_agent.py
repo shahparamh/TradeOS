@@ -49,7 +49,7 @@ Your response MUST be valid JSON matching this schema:
                 {"role": "user", "content": payload}
             ],
             response_format={"type": "json_object"},
-            temperature=0.1
+            temperature=0.3
         )
         
         content = response.choices[0].message.content

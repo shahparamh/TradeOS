@@ -49,6 +49,9 @@ def _fetch_remote_fundamentals(symbol: str) -> dict:
 
 
 def fetch_yf_fundamentals(symbol: str) -> dict:
+    """Fetch fundamentals with 1-day caching. 
+    During refresh window (00:30-02:30 IST): fetch fresh and cache.
+    Outside refresh window: if cached today, return cache; if cache miss, fetch on-demand and cache."""
     now = get_ist_now()
     today_str = now.date().isoformat()
 
@@ -57,22 +60,33 @@ def fetch_yf_fundamentals(symbol: str) -> dict:
         if cached and cached[1] == today_str:
             return cached[0]
 
-    if not _is_refresh_window(now):
-        if cached:
-            logger.info(f"Returning cached fundamentals for {symbol} outside refresh window.")
-            return cached[0]
-        logger.warning(f"Skipping fundamentals fetch for {symbol} outside refresh window.")
-        return {"symbol": symbol}
-
+    # If in refresh window, fetch fresh
+    if _is_refresh_window(now):
+        try:
+            data = _fetch_remote_fundamentals(symbol)
+            with _cache_lock:
+                _fundamentals_cache[symbol] = (data, today_str)
+            return data
+        except Exception as e:
+            logger.error(f"Error fetching yfinance fundamentals for {symbol}: {e}")
+            if cached:
+                return cached[0]
+            return {"symbol": symbol}
+    
+    # Outside refresh window: if cache hit, return it
+    if cached:
+        logger.info(f"Returning cached fundamentals for {symbol} outside refresh window.")
+        return cached[0]
+    
+    # Outside refresh window + cache miss: fetch on-demand for trading
+    logger.debug(f"On-demand fundamentals fetch for {symbol} during trading hours (cache miss).")
     try:
         data = _fetch_remote_fundamentals(symbol)
         with _cache_lock:
             _fundamentals_cache[symbol] = (data, today_str)
         return data
     except Exception as e:
-        logger.error(f"Error fetching yfinance fundamentals for {symbol}: {e}")
-        if cached:
-            return cached[0]
+        logger.error(f"Error fetching on-demand fundamentals for {symbol}: {e}")
         return {"symbol": symbol}
 
 
