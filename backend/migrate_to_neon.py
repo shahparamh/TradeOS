@@ -14,7 +14,7 @@ sqlite_url = "sqlite:///tradeos.db"
 # Neon PostgreSQL Database (Loaded dynamically from your secure .env)
 neon_url = os.getenv("DATABASE_URL")
 if not neon_url or "sqlite" in neon_url:
-    neon_url = "postgresql://neondb_owner:npg_WpuLcm83MwQS@ep-steep-forest-apd1dovt.c-7.us-east-1.aws.neon.tech/neondb?sslmode=require"
+    raise ValueError("DATABASE_URL environment variable is missing or set to sqlite. Please set it to your Neon PostgreSQL URL in the .env file.")
 
 print("Initializing database engines...")
 sqlite_engine = create_engine(sqlite_url)

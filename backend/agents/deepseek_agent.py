@@ -12,7 +12,12 @@ async def query_deepseek(payload: str, system_prompt: str = None) -> dict:
     """
     api_key = settings.DEEPSEEK_API_KEY
     if not api_key:
-        raise ValueError("DeepSeek API key is missing. Please configure DEEPSEEK_API_KEY.")
+        logger.error("DeepSeek API key is missing. Please configure DEEPSEEK_API_KEY.")
+        return {
+            "decision": "HOLD",
+            "confidence": 0,
+            "reasoning": "DeepSeek API key is missing. Please configure DEEPSEEK_API_KEY."
+        }
 
     try:
         client = AsyncOpenAI(

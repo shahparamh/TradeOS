@@ -206,12 +206,18 @@ class TradingScheduler:
                 except Exception as inner_ex:
                     logger.error(f"Failed to process scan for {symbol}: {inner_ex}")
                 finally:
-                    local_db.close()
+                    try:
+                        local_db.close()
+                    except Exception as ex:
+                        logger.error(f"Error closing local db for {symbol}: {ex}")
                 
         except Exception as e:
             logger.error(f"Trading cycle error: {e}")
         finally:
-            db.close()
+            try:
+                db.close()
+            except Exception as e:
+                logger.error(f"Error closing main db session: {e}")
             self.is_running_cycle = False
             logger.info("=== TRADING CYCLE END ===")
 
