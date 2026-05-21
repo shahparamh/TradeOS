@@ -13,6 +13,7 @@ from api.routes_agents import router as agents_router
 from api.routes_broker import router as broker_router
 from api.routes_auth import router as auth_router
 from api.routes_settings import router as settings_router
+from api.routes_health import router as health_router
 from scheduler.trading_loop import TradingScheduler
 from utils.api_manager import initialize_api_manager
 
@@ -154,11 +155,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Health check
-@app.get("/api/health")
-def health_check():
-    return {"status": "alive", "platform": "TradeOS"}
-
 # Root endpoint for platform health checks (Render, etc.)
 @app.get("/")
 def read_root():
@@ -276,6 +272,7 @@ def get_today_pre_market_strategy():
         db.close()
 
 # Include routers
+app.include_router(health_router, prefix="/api")
 app.include_router(market_router, prefix="/api")
 app.include_router(scanner_router, prefix="/api")
 app.include_router(agents_router, prefix="/api")
