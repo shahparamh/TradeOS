@@ -36,9 +36,13 @@ const Settings = () => {
         min_risk_reward_ratio: 1.0,
         max_consecutive_losses: 5,
         max_trades_per_stock_daily: 5,
+        max_trades_daily_per_model: 3,
         entry_start_hour: 9.25,
         entry_end_hour: 15.0,
         enable_fno_trading: true,
+        enable_equity_trading: false,
+        equity_ai_cooldown_min: 30,
+        fno_ai_cooldown_min: 30,
         starting_capital_per_agent: 5000000.0
     });
     
@@ -225,6 +229,39 @@ const Settings = () => {
                             </div>
                             <div className="setting-row">
                                 <div>
+                                    <div className="sr-label">Max Daily Trades Per Model</div>
+                                    <div className="sr-desc">Strict daily limit on total trades (Equity/F&O) executed per model</div>
+                                </div>
+                                <div className="number-input">
+                                    <button onClick={() => setRule('max_trades_daily_per_model', Math.max(1, (rules.max_trades_daily_per_model || 0) - 1))}>-</button>
+                                    <span>{rules.max_trades_daily_per_model || 0}</span>
+                                    <button onClick={() => setRule('max_trades_daily_per_model', Math.min(50, (rules.max_trades_daily_per_model || 0) + 1))}>+</button>
+                                </div>
+                            </div>
+                            <div className="setting-row">
+                                <div>
+                                    <div className="sr-label">Equity AI Cooldown (Minutes)</div>
+                                    <div className="sr-desc">AI scanning interval check for Equity stocks to save API keys</div>
+                                </div>
+                                <div className="number-input">
+                                    <button onClick={() => setRule('equity_ai_cooldown_min', Math.max(5, (rules.equity_ai_cooldown_min || 0) - 5))}>-</button>
+                                    <span>{rules.equity_ai_cooldown_min || 0} m</span>
+                                    <button onClick={() => setRule('equity_ai_cooldown_min', Math.min(180, (rules.equity_ai_cooldown_min || 0) + 5))}>+</button>
+                                </div>
+                            </div>
+                            <div className="setting-row">
+                                <div>
+                                    <div className="sr-label">F&O AI Cooldown (Minutes)</div>
+                                    <div className="sr-desc">AI scanning interval check for F&O indices to save API keys</div>
+                                </div>
+                                <div className="number-input">
+                                    <button onClick={() => setRule('fno_ai_cooldown_min', Math.max(5, (rules.fno_ai_cooldown_min || 0) - 5))}>-</button>
+                                    <span>{rules.fno_ai_cooldown_min || 0} m</span>
+                                    <button onClick={() => setRule('fno_ai_cooldown_min', Math.min(180, (rules.fno_ai_cooldown_min || 0) + 5))}>+</button>
+                                </div>
+                            </div>
+                            <div className="setting-row">
+                                <div>
                                     <div className="sr-label">Allowed Entry Hours (IST)</div>
                                     <div className="sr-desc">Allowed entry hours (start to end hour)</div>
                                 </div>
@@ -244,12 +281,43 @@ const Settings = () => {
                                     <button onClick={() => setRule('entry_end_hour', Math.min(15.25, (rules.entry_end_hour || 0) + 0.25))}>+</button>
                                 </div>
                             </div>
-                            <div className="setting-row">
+                            <div className="setting-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '12px' }}>
                                 <div>
-                                    <div className="sr-label">Enable Futures & Options (F&O)</div>
-                                    <div className="sr-desc">Allow agents to trade option premiums (CE/PE) and index futures</div>
+                                    <div className="sr-label">Active System Trading Mode</div>
+                                    <div className="sr-desc">Select active trading mode. Equity and F&O cannot be active in parallel to save API limits.</div>
                                 </div>
-                                <ToggleSwitch value={rules.enable_fno_trading !== false} onChange={v => setRule('enable_fno_trading', v)} />
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
+                                    <button 
+                                        className={`btn ${rules.enable_equity_trading && !rules.enable_fno_trading ? 'btn-primary' : 'btn-secondary'}`}
+                                        onClick={() => {
+                                            setRule('enable_equity_trading', true);
+                                            setRule('enable_fno_trading', false);
+                                        }}
+                                        style={{ padding: '10px', fontSize: '12px', fontWeight: 'bold' }}
+                                    >
+                                        Equity Trading Mode
+                                    </button>
+                                    <button 
+                                        className={`btn ${!rules.enable_equity_trading && rules.enable_fno_trading ? 'btn-primary' : 'btn-secondary'}`}
+                                        onClick={() => {
+                                            setRule('enable_equity_trading', false);
+                                            setRule('enable_fno_trading', true);
+                                        }}
+                                        style={{ padding: '10px', fontSize: '12px', fontWeight: 'bold' }}
+                                    >
+                                        F&O Trading Mode
+                                    </button>
+                                    <button 
+                                        className={`btn ${!rules.enable_equity_trading && !rules.enable_fno_trading ? 'btn-primary' : 'btn-secondary'}`}
+                                        onClick={() => {
+                                            setRule('enable_equity_trading', false);
+                                            setRule('enable_fno_trading', false);
+                                        }}
+                                        style={{ padding: '10px', fontSize: '12px', fontWeight: 'bold', border: '1px solid rgba(239, 68, 68, 0.4)' }}
+                                    >
+                                        Pause All Trading
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     )}

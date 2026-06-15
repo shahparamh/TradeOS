@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from database.connection import get_db
 from database.models import Trade, Position, Agent, DailyPerformance
 from data.market_fetcher import fetch_live_price
+from utils.helpers import get_ist_now
 
 router = APIRouter(prefix="/broker", tags=["Broker & Risk"])
 
@@ -175,7 +176,7 @@ def get_agent_status(agent_id: int, db: Session = Depends(get_db)):
         "open_positions_count": len(agent.positions),
         "today_trades_count": len([
             t for t in agent.trades
-            if t.entry_time and t.entry_time.date() == datetime.utcnow().date()
+            if t.entry_time and t.entry_time.date() == get_ist_now().date()
         ])
     }
 

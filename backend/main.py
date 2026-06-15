@@ -45,7 +45,6 @@ def seed_db():
         Agent(name="Gemini", model_name=settings.GEMINI_MODEL, provider="google", cash_balance=settings.INITIAL_CAPITAL, total_pnl=0.0),
         Agent(name="Groq-Llama", model_name="llama-3.3-70b", provider="groq", cash_balance=settings.INITIAL_CAPITAL, total_pnl=0.0),
         Agent(name="GitHub Model", model_name=settings.GITHUB_MODEL, provider="github", cash_balance=settings.INITIAL_CAPITAL, total_pnl=0.0),
-        Agent(name="HuggingFace Model", model_name=settings.HF_MODEL, provider="huggingface", cash_balance=settings.INITIAL_CAPITAL, total_pnl=0.0),
         Agent(name="DeepSeek-R1", model_name="deepseek-reasoning", provider="deepseek", cash_balance=settings.INITIAL_CAPITAL, total_pnl=0.0),
         Agent(name="Local-Ollama", model_name="llama3.2", provider="ollama", cash_balance=settings.INITIAL_CAPITAL, total_pnl=0.0)
     ]
@@ -110,8 +109,6 @@ def seed_db():
             has_key = bool(settings.GROQ_API_KEY or settings.GROQ_API_KEYS)
         elif agent.provider == "github":
             has_key = bool(settings.GITHUB_API_KEY)
-        elif agent.provider == "huggingface":
-            has_key = bool(settings.HF_API_KEY)
         elif agent.provider == "deepseek":
             has_key = bool(settings.DEEPSEEK_API_KEY)
         elif agent.provider == "ollama":
@@ -184,7 +181,7 @@ async def trigger_cycle_manually():
 
 @app.post("/api/scheduler/monitor")
 async def trigger_monitor_manually():
-    await trading_scheduler.run_monitor_cycle()
+    await trading_scheduler.run_monitor_cycle(ignore_hours=True)
     return {"status": "completed", "message": "Position monitor check completed"}
 
 @app.post("/api/scheduler/pre-market")

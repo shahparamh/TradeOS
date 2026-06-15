@@ -24,6 +24,24 @@ def _is_refresh_window(now) -> bool:
 
 
 def _fetch_remote_fundamentals(symbol: str) -> dict:
+    if symbol.startswith("^"):
+        return {
+            "symbol": symbol,
+            "market_cap": None,
+            "pe_ratio": None,
+            "pb_ratio": None,
+            "dividend_yield": None,
+            "eps": None,
+            "52_week_high": None,
+            "52_week_low": None,
+            "sector": "Indices",
+            "industry": "Market Index",
+            "revenue_growth": None,
+            "profit_growth": None,
+            "roe": None,
+            "debt_to_equity": None
+        }
+
     ticker = yf.Ticker(symbol)
     info = rate_limited_call(lambda: ticker.info)
 

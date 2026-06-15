@@ -36,6 +36,7 @@ class RiskManager:
             enable_lockout = self.get_rule(db, "enable_loss_lockout", False)
             min_profit_pct = self.get_rule(db, "min_profit_threshold_pct", 0.005)
             enable_fno = self.get_rule(db, "enable_fno_trading", True)
+            enable_equity = self.get_rule(db, "enable_equity_trading", False)
             
             self.max_open_positions = int(self.get_rule(db, "max_open_positions", 40.0))
             self.max_capital_per_trade = self.get_rule(db, "max_capital_per_trade_pct", 0.50)
@@ -47,6 +48,7 @@ class RiskManager:
             self.min_risk_reward_ratio = self.get_rule(db, "min_risk_reward_ratio", 1.0)
             self.max_consecutive_losses = int(self.get_rule(db, "max_consecutive_losses", 5.0))
             self.max_trades_per_stock_daily = int(self.get_rule(db, "max_trades_per_stock_daily", 5.0))
+            self.max_trades_daily_per_model = int(self.get_rule(db, "max_trades_daily_per_model", 3.0))
             self.entry_start_hour = self.get_rule(db, "entry_start_hour", 9.25)
             self.entry_end_hour = self.get_rule(db, "entry_end_hour", 15.0)
         finally:
@@ -57,12 +59,14 @@ class RiskManager:
             self._check_time_of_day_filters(decision), # Dynamic Time-of-day rule
             self._check_min_confidence(decision),      # Dynamic Confidence rule
             self._check_fno_disabled(decision, enable_fno), # Dynamic F&O rule
+            self._check_equity_disabled(decision, enable_equity), # Dynamic Equity rule
             self._check_circuit_breaker(agent_state),  # Dynamic Drawdowns & Losses rule
             self._check_no_short_selling(decision, enable_short),
             self._check_daily_loss_lockout(decision, agent_state, enable_lockout),
             self._check_minimum_profit_threshold(decision, min_profit_pct),
             self._check_position_limit(agent_state),
             self._check_intraday_trade_limit(decision, agent_state),
+            self._check_daily_model_trade_limit(decision, agent_state),
             self._check_duplicate_position(decision, agent_state),
             self._check_per_stock_daily_limit(decision, agent_state),
             self._check_stop_loss_distance(decision),
@@ -417,6 +421,43 @@ class RiskManager:
                 return {
                     "passed": False,
                     "reason": f"PER_STOCK_LIMIT_EXCEEDED: Agent has already traded {symbol} {trades_today} times today. Maximum allowed is {self.max_trades_per_stock_daily} trades per stock per model per day."
+                }
+            return {"passed": True}
+        finally:
+            db.close()
+
+    def _check_equity_disabled(self, decision: dict, enable_equity: bool) -> dict:
+        trade_type = decision.get("trade_type", "INTRADAY")
+        if trade_type in ["INTRADAY", "SWING"] and not enable_equity:
+            return {
+                "passed": False,
+                "reason": "EQUITY_TRADING_DISABLED: Equity trading is disabled in system configurations."
+            }
+        return {"passed": True}
+
+    def _check_daily_model_trade_limit(self, decision: dict, agent_state: dict) -> dict:
+        agent_id = decision.get("agent_id")
+        if not agent_id:
+            return {"passed": True}
+
+        from database.connection import SessionLocal
+        from database.models import Trade
+        from datetime import datetime, date
+        from utils.helpers import get_ist_now
+
+        db = SessionLocal()
+        try:
+            today_start = datetime.combine(get_ist_now().date(), datetime.min.time())
+            
+            trades_today = db.query(Trade).filter(
+                Trade.agent_id == agent_id,
+                Trade.entry_time >= today_start
+            ).count()
+
+            if trades_today >= self.max_trades_daily_per_model:
+                return {
+                    "passed": False,
+                    "reason": f"DAILY_LIMIT_EXCEEDED: Model has already executed {trades_today} trades today. Maximum allowed is {self.max_trades_daily_per_model} trades per model per day."
                 }
             return {"passed": True}
         finally:

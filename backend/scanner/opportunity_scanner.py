@@ -1,5 +1,5 @@
 class OpportunityScanner:
-    def scan_all(self, watchlist_data: list[dict], news_data: dict, fundamentals: dict) -> list[dict]:
+    def scan_all(self, watchlist_data: list[dict], news_data: dict, fundamentals: dict, derivatives: dict = None) -> list[dict]:
         opportunities = []
         for stock in watchlist_data:
             # Skip if error
@@ -7,14 +7,28 @@ class OpportunityScanner:
                 continue
                 
             results = []
-            stock_news = news_data.get(stock["symbol"], [])
-            stock_fund = fundamentals.get(stock["symbol"], {})
+            symbol = stock["symbol"]
+            stock_news = news_data.get(symbol, [])
+            stock_fund = fundamentals.get(symbol, {})
+            stock_deriv = derivatives.get(symbol, {}) if derivatives else {}
             
-            results.extend(self.scan_momentum_breakout(stock))
-            results.extend(self.scan_bearish_breakdown(stock, stock_news))
-            results.extend(self.scan_earnings_momentum(stock, stock_fund, stock_news))
-            results.extend(self.scan_panic_selloff(stock, stock_news))
-            results.extend(self.scan_mean_reversion(stock))
+            is_fno = symbol.startswith("^") or symbol in ["NIFTY", "BANKNIFTY", "FINNIFTY"]
+            
+            if is_fno:
+                # F&O specific scanner logic
+                results.extend(self.scan_momentum_breakout(stock))
+                results.extend(self.scan_bearish_breakdown(stock, stock_news))
+                results.extend(self.scan_mean_reversion(stock))
+                results.extend(self.scan_price_action(stock))
+                results.extend(self.scan_fno_derivatives(stock, stock_deriv))
+            else:
+                # Equity specific scanner logic
+                results.extend(self.scan_momentum_breakout(stock))
+                results.extend(self.scan_bearish_breakdown(stock, stock_news))
+                results.extend(self.scan_earnings_momentum(stock, stock_fund, stock_news))
+                results.extend(self.scan_panic_selloff(stock, stock_news))
+                results.extend(self.scan_mean_reversion(stock))
+                results.extend(self.scan_price_action(stock))
             
             opportunities.extend(results)
             
@@ -171,6 +185,86 @@ class OpportunityScanner:
                 "suggested_action": "SHORT",
                 "suggested_position": "SHORT",
                 "reasons": ["Price over-extended to upside, volume drying up"],
+                "indicators": stock
+            }]
+        return []
+
+    def scan_price_action(self, stock: dict) -> list[dict]:
+        symbol = stock["symbol"]
+        price = stock["price"]
+        rsi = stock["rsi"]
+        pattern = stock.get("candlestick_pattern", "None")
+        vol_ratio = stock.get("volume_ratio", 1.0)
+        
+        # Bullish Price Action: Hammer or Bullish Engulfing near support / oversold zone
+        if pattern in ["Hammer", "Bullish Engulfing"]:
+            if rsi < 45 or stock["bb_position"] == "oversold" or price <= stock.get("support_1", 0) * 1.01:
+                return [{
+                    "symbol": symbol,
+                    "signal_type": "bullish_price_action",
+                    "signal_strength": "strong" if vol_ratio > 1.2 else "moderate",
+                    "suggested_action": "BUY",
+                    "suggested_position": "LONG",
+                    "reasons": [
+                        f"Bullish price action pattern detected: {pattern}",
+                        "Price is located near key support or in oversold zone",
+                        f"RSI is at {rsi}"
+                    ],
+                    "indicators": stock
+                }]
+                
+        # Bearish Price Action: Bearish Engulfing near resistance / overbought zone
+        if pattern == "Bearish Engulfing":
+            if rsi > 55 or stock["bb_position"] == "overbought" or price >= stock.get("resistance_1", 0) * 0.99:
+                return [{
+                    "symbol": symbol,
+                    "signal_type": "bearish_price_action",
+                    "signal_strength": "strong" if vol_ratio > 1.2 else "moderate",
+                    "suggested_action": "SHORT",
+                    "suggested_position": "SHORT",
+                    "reasons": [
+                        f"Bearish price action pattern detected: {pattern}",
+                        "Price is located near key resistance or in overbought zone",
+                        f"RSI is at {rsi}"
+                    ],
+                    "indicators": stock
+                }]
+        return []
+
+    def scan_fno_derivatives(self, stock: dict, derivatives: dict) -> list[dict]:
+        symbol = stock["symbol"]
+        pcr = derivatives.get("oi_pcr", 1.0)
+        sentiment = derivatives.get("oi_sentiment", "NEUTRAL")
+        
+        # Bullish F&O Setup: PCR is bullish (support floor) and technical trend is bullish
+        if pcr >= 1.15 and stock.get("trend") in ["strong_bullish", "bullish"]:
+            return [{
+                "symbol": symbol,
+                "signal_type": "bullish_fno_trend",
+                "signal_strength": "strong" if pcr >= 1.3 else "moderate",
+                "suggested_action": "BUY",
+                "suggested_position": "BUY_CE",
+                "reasons": [
+                    f"Bullish Put-Call Ratio (PCR: {pcr}) indicates strong support floor",
+                    f"Technical trend is {stock.get('trend')}",
+                    f"Option chain sentiment is {sentiment}"
+                ],
+                "indicators": stock
+            }]
+            
+        # Bearish F&O Setup: PCR is bearish (heavy resistance) and technical trend is bearish
+        if pcr <= 0.75 and stock.get("trend") in ["strong_bearish", "bearish"]:
+            return [{
+                "symbol": symbol,
+                "signal_type": "bearish_fno_trend",
+                "signal_strength": "strong" if pcr <= 0.6 else "moderate",
+                "suggested_action": "SHORT",
+                "suggested_position": "BUY_PE",
+                "reasons": [
+                    f"Bearish Put-Call Ratio (PCR: {pcr}) indicates heavy overhead resistance",
+                    f"Technical trend is {stock.get('trend')}",
+                    f"Option chain sentiment is {sentiment}"
+                ],
                 "indicators": stock
             }]
         return []

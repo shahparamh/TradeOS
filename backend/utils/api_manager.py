@@ -174,14 +174,12 @@ def initialize_api_manager():
     groq_keys = _to_list(settings.GROQ_API_KEYS) or _to_list(settings.GROQ_API_KEY)
     newsapi_keys = _to_list(getattr(settings, "NEWS_API_KEYS", []))
     github_keys = _to_list(getattr(settings, "GITHUB_API_KEYS", [])) or _to_list(getattr(settings, "GITHUB_API_KEY", ""))
-    hf_key = _to_list(getattr(settings, "HF_API_KEY", ""))
     deepseek_key = _to_list(getattr(settings, "DEEPSEEK_API_KEY", ""))
 
     api_key_manager.register("gemini", gemini_keys)
     api_key_manager.register("groq", groq_keys)
     api_key_manager.register("newsapi", newsapi_keys)
     api_key_manager.register("github", github_keys)
-    api_key_manager.register("huggingface", hf_key)
     api_key_manager.register("deepseek", deepseek_key)
 
     logger.info("[APIManager] Initialized with all configured API keys.")

@@ -47,7 +47,6 @@ const AgentDetail = () => {
         'groq': 'var(--color-groq)',
         'chatgpt': 'var(--color-chatgpt)',
         'github': 'var(--color-github)',
-        'huggingface': 'var(--color-huggingface)',
     };
     const colorKey = agent.name.toLowerCase().split('-')[0];
     const agentColor = colorMap[colorKey] || 'var(--accent-blue)';

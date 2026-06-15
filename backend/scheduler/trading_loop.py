@@ -111,8 +111,25 @@ class TradingScheduler:
         self.scheduler.start()
         logger.info("TradeOS Scheduler started.")
 
-    async def run_monitor_cycle(self):
+    async def run_monitor_cycle(self, ignore_hours: bool = False):
         """Runs the position monitor to check for SL/TP hits."""
+        if not ignore_hours:
+            from datetime import datetime, timezone, timedelta
+            from utils.market_calendar import is_market_holiday
+            ist = timezone(timedelta(hours=5, minutes=30))
+            now = datetime.now(ist)
+            
+            # 1. Market Closed Check (Weekend or Holiday)
+            if is_market_holiday(now.date()):
+                return
+                
+            # 2. Market Hours Check (9:15 AM to 3:30 PM)
+            market_start = now.replace(hour=9, minute=15, second=0, microsecond=0)
+            market_end = now.replace(hour=15, minute=30, second=0, microsecond=0)
+            
+            if now < market_start or now > market_end:
+                return
+
         db = SessionLocal()
         try:
             from broker.virtual_broker import VirtualBroker
@@ -180,20 +197,45 @@ class TradingScheduler:
             # 3. Watchlist symbols (Loaded dynamically from constants)
             symbols = WATCHLIST
             
+            # Fetch rules for category switches and cooldowns
+            from database.models import SystemRule
+            enable_equity = db.query(SystemRule).filter(SystemRule.key == "enable_equity_trading").first()
+            enable_equity_bool = enable_equity.bool_value if enable_equity else True
+            
+            enable_fno = db.query(SystemRule).filter(SystemRule.key == "enable_fno_trading").first()
+            enable_fno_bool = enable_fno.bool_value if enable_fno else True
+
+            equity_cooldown = db.query(SystemRule).filter(SystemRule.key == "equity_ai_cooldown_min").first()
+            equity_cooldown_min = float(equity_cooldown.numeric_value) if equity_cooldown else 30.0
+
+            fno_cooldown = db.query(SystemRule).filter(SystemRule.key == "fno_ai_cooldown_min").first()
+            fno_cooldown_min = float(fno_cooldown.numeric_value) if fno_cooldown else 30.0
+            
             # Scan symbols sequentially to prevent rate limits and overloading the APIs
             for symbol in symbols:
+                # 1. Category check
+                is_fno = symbol.startswith("^") or symbol in ["^NSEI", "^NSEBANK", "NIFTY", "BANKNIFTY", "FINNIFTY"]
+                if is_fno and not enable_fno_bool:
+                    logger.info(f"Skipping {symbol} scan - F&O trading is disabled.")
+                    continue
+                if not is_fno and not enable_equity_bool:
+                    logger.info(f"Skipping {symbol} scan - Equity trading is disabled.")
+                    continue
+                
                 local_db = SessionLocal()
                 try:
-                    # Cooldown check: Skip stocks analyzed in the last 15 minutes unless ignore_hours is set
+                    # 2. Cooldown check: Skip stocks analyzed within the cooldown window (30 mins default)
                     from datetime import datetime, timedelta
-                    five_mins_ago = datetime.utcnow() - timedelta(minutes=15)
+                    cooldown_min = fno_cooldown_min if is_fno else equity_cooldown_min
+                    cooldown_start = datetime.utcnow() - timedelta(minutes=cooldown_min)
+                    
                     recent_scan = local_db.query(AIResponse).filter(
                         AIResponse.symbol == symbol,
-                        AIResponse.created_at >= five_mins_ago
+                        AIResponse.created_at >= cooldown_start
                     ).first()
                     
                     if not ignore_hours and recent_scan:
-                        logger.info(f"Skipping {symbol} scan - recently analyzed in the last 15 minutes.")
+                        logger.info(f"Skipping {symbol} scan - recently analyzed in the last {cooldown_min} minutes.")
                         continue
                         
                     logger.info(f"Scanning {symbol}...")
@@ -240,7 +282,7 @@ class TradingScheduler:
                     # PRE-FILTER 2: Full Opportunity Scanner
                     from scanner.opportunity_scanner import OpportunityScanner
                     scanner = OpportunityScanner()
-                    opps = scanner.scan_all([indicators], {symbol: news_payload}, {symbol: fundamentals})
+                    opps = scanner.scan_all([indicators], {symbol: news_payload}, {symbol: fundamentals}, {symbol: oi_metrics})
                     
                     if not ignore_hours and not opps:
                         logger.info(f"Skipping {symbol} - No scanner opportunities found.")
@@ -353,6 +395,14 @@ class TradingScheduler:
             # 3. Watchlist
             symbols = WATCHLIST
             
+            # Fetch rules for category switches
+            from database.models import SystemRule
+            enable_equity = db.query(SystemRule).filter(SystemRule.key == "enable_equity_trading").first()
+            enable_equity_bool = enable_equity.bool_value if enable_equity else True
+            
+            enable_fno = db.query(SystemRule).filter(SystemRule.key == "enable_fno_trading").first()
+            enable_fno_bool = enable_fno.bool_value if enable_fno else True
+            
             from agents.prompts import PRE_MARKET_SYSTEM_PROMPT, build_pre_market_payload
             from data.news_fetcher import fetch_all_news_for_stock
             from database.models import AgentDailyStrategy
@@ -362,10 +412,17 @@ class TradingScheduler:
             from agents.gemini_agent import query_gemini
             from agents.groq_agent import query_groq
             from agents.github_agent import query_github
-            from agents.huggingface_agent import query_huggingface
             from agents.ollama_agent import query_ollama
             
             for symbol in symbols:
+                # Category check
+                is_fno = symbol.startswith("^") or symbol in ["^NSEI", "^NSEBANK", "NIFTY", "BANKNIFTY", "FINNIFTY"]
+                if is_fno and not enable_fno_bool:
+                    logger.info(f"Skipping pre-market planning for {symbol} - F&O trading is disabled.")
+                    continue
+                if not is_fno and not enable_equity_bool:
+                    logger.info(f"Skipping pre-market planning for {symbol} - Equity trading is disabled.")
+                    continue
                 # Fetch recent news to pass into LLM context
                 news = []
                 try:
@@ -396,8 +453,6 @@ class TradingScheduler:
                             decision_data = await query_groq(payload_str, system_prompt=PRE_MARKET_SYSTEM_PROMPT)
                         elif agent.provider == "github":
                             decision_data = await query_github(payload_str, system_prompt=PRE_MARKET_SYSTEM_PROMPT)
-                        elif agent.provider == "huggingface":
-                            decision_data = await query_huggingface(payload_str, system_prompt=PRE_MARKET_SYSTEM_PROMPT)
                         elif agent.provider == "deepseek":
                             from agents.deepseek_agent import query_deepseek
                             decision_data = await query_deepseek(payload_str, system_prompt=PRE_MARKET_SYSTEM_PROMPT)

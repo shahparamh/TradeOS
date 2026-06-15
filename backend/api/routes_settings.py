@@ -32,7 +32,11 @@ def get_system_rules(db: Session = Depends(get_db)):
         "max_trades_per_stock_daily": {"type": "float", "numeric_value": 5.0, "desc": "Maximum trades per stock per model per day"},
         "entry_start_hour": {"type": "float", "numeric_value": 9.25, "desc": "Allowed entry start hour (e.g., 9.25 for 9:15 AM)"},
         "entry_end_hour": {"type": "float", "numeric_value": 15.0, "desc": "Allowed entry end hour (e.g., 15.0 for 3:00 PM)"},
-        "enable_fno_trading": {"type": "boolean", "bool_value": True, "desc": "Toggle Futures & Options (F&O) accessibility for AI models"},
+        "enable_fno_trading": {"type": "boolean", "bool_value": True, "desc": "Toggle Futures & Options (F&O) trading and scanning for AI models"},
+        "enable_equity_trading": {"type": "boolean", "bool_value": False, "desc": "Toggle Equity trading and scanning for AI models"},
+        "max_trades_daily_per_model": {"type": "float", "numeric_value": 3.0, "desc": "Maximum trades per model across all symbols per day"},
+        "equity_ai_cooldown_min": {"type": "float", "numeric_value": 30.0, "desc": "AI request cooldown for Equity symbols in minutes"},
+        "fno_ai_cooldown_min": {"type": "float", "numeric_value": 30.0, "desc": "AI request cooldown for F&O symbols in minutes"},
         "starting_capital_per_agent": {"type": "float", "numeric_value": 5000000.0, "desc": "Starting balance per AI agent upon platform reset"}
     }
     
@@ -83,7 +87,15 @@ def update_system_rules(payload: RuleUpdate, db: Session = Depends(get_db), curr
             detail="You do not have permission to update system trading rules."
         )
         
-    for key, value in payload.rules.items():
+    rules_dict = dict(payload.rules)
+    
+    # Enforce mutual exclusivity
+    if rules_dict.get("enable_equity_trading") is True:
+        rules_dict["enable_fno_trading"] = False
+    elif rules_dict.get("enable_fno_trading") is True:
+        rules_dict["enable_equity_trading"] = False
+        
+    for key, value in rules_dict.items():
         rule = db.query(SystemRule).filter(SystemRule.key == key).first()
         if not rule:
             # Create dynamically if doesn't exist

@@ -12,7 +12,6 @@ const AgentCard = ({ agent, rank }) => {
         'claude': 'var(--color-claude)',
         'grok': 'var(--color-grok)',
         'github': 'var(--color-github)',
-        'huggingface': 'var(--color-huggingface)',
     };
     const colorKey = agent.name.toLowerCase().split('-')[0];
     const color = colorMap[colorKey] || 'var(--accent-blue)';

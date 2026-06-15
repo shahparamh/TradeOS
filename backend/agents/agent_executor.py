@@ -9,7 +9,6 @@ from datetime import datetime
 from agents.gemini_agent import query_gemini
 from agents.groq_agent import query_groq
 from agents.github_agent import query_github
-from agents.huggingface_agent import query_huggingface
 from agents.deepseek_agent import query_deepseek
 from agents.prompts import build_ai_payload
 from database.connection import SessionLocal
@@ -17,6 +16,7 @@ from database.models import Agent, AIResponse
 from utils.logger import setup_logger
 
 from agents.ollama_agent import query_ollama
+from utils.helpers import get_ist_now
 
 logger = setup_logger("agent_executor")
 
@@ -33,8 +33,6 @@ async def query_agent_pipeline(agent, payload_dict: dict, opportunity: dict) -> 
             decision = await query_groq(payload_str)
         elif agent.provider == "github":
             decision = await query_github(payload_str)
-        elif agent.provider == "huggingface":
-            decision = await query_huggingface(payload_str)
         elif agent.provider == "deepseek":
             decision = await query_deepseek(payload_str)
         elif agent.provider == "ollama":
@@ -102,8 +100,6 @@ RESPONSE FORMAT (strict JSON):
                 critique = await query_groq(objection_prompt)
             elif agent.provider == "github":
                 critique = await query_github(objection_prompt)
-            elif agent.provider == "huggingface":
-                critique = await query_huggingface(objection_prompt)
             elif agent.provider == "deepseek":
                 critique = await query_deepseek(objection_prompt)
             elif agent.provider == "ollama":
@@ -225,7 +221,7 @@ async def execute_all_agents(
                 "positions_count": len(agent.positions),
                 "today_trades_count": len([
                     t for t in agent.trades
-                    if t.entry_time and t.entry_time.date() == datetime.utcnow().date()
+                    if t.entry_time and t.entry_time.date() == get_ist_now().date()
                 ]),
                 "today_pnl": 0.0,
                 "total_pnl": agent.total_pnl,
@@ -238,23 +234,51 @@ async def execute_all_agents(
         agent_names = []
         ignore_hours = opportunity.get("ignore_hours", False)
         for agent in agents:
-            # OPTIMIZATION: If this model has already executed maximum trades for this stock today,
-            # skip the LLM API call entirely to save API credits and request limits!
-            from database.models import Trade, SystemRule
+            from database.models import Trade, SystemRule, Position
             from datetime import date
-            today_start = datetime.combine(date.today(), datetime.min.time())
+            from utils.helpers import get_ist_now
             
+            # 1. Open Position Check: If the agent already has a position in this symbol, skip LLM call!
+            has_pos = db.query(Position).filter(
+                Position.agent_id == agent.id,
+                Position.symbol == opportunity.get("symbol")
+            ).first() is not None
+            if has_pos:
+                logger.info(f"Skipping LLM API query for {agent.name} on {opportunity.get('symbol')} - already has an open position.")
+                continue
+
+            # 2. Max Open Positions Check
+            max_pos_rule = db.query(SystemRule).filter(SystemRule.key == "max_open_positions").first()
+            max_open_positions = int(max_pos_rule.numeric_value) if max_pos_rule else 40
+            if len(agent.positions) >= max_open_positions:
+                logger.info(f"Skipping LLM API query for {agent.name} on {opportunity.get('symbol')} - reached max open positions limit ({max_open_positions}).")
+                continue
+
+            # 3. Daily Model Trades Check
+            today_start_ist = datetime.combine(get_ist_now().date(), datetime.min.time())
+            model_trades_today = db.query(Trade).filter(
+                Trade.agent_id == agent.id,
+                Trade.entry_time >= today_start_ist
+            ).count()
+            
+            daily_rule = db.query(SystemRule).filter(SystemRule.key == "max_trades_daily_per_model").first()
+            max_daily_trades = int(daily_rule.numeric_value) if daily_rule else 3
+            if not ignore_hours and model_trades_today >= max_daily_trades:
+                logger.info(f"Skipping LLM API query for {agent.name} on {opportunity.get('symbol')} - reached daily model trade limit ({model_trades_today}/{max_daily_trades}).")
+                continue
+
+            # 4. Daily Stock Trades Check
             stock_trades_today = db.query(Trade).filter(
                 Trade.agent_id == agent.id,
                 Trade.symbol == opportunity.get("symbol"),
-                Trade.entry_time >= today_start
+                Trade.entry_time >= today_start_ist
             ).count()
             
             rule = db.query(SystemRule).filter(SystemRule.key == "max_trades_per_stock_daily").first()
             max_stock_trades = int(rule.numeric_value) if rule else 5
             
             if not ignore_hours and stock_trades_today >= max_stock_trades:
-                logger.info(f"Skipping LLM API query for {agent.name} on {opportunity.get('symbol')} - already traded {stock_trades_today} today.")
+                logger.info(f"Skipping LLM API query for {agent.name} on {opportunity.get('symbol')} - already traded {opportunity.get('symbol')} {stock_trades_today} times today.")
                 continue
 
             payload_dict = json.loads(build_ai_payload(market_context, opportunity, news, agent_states[agent.name]))

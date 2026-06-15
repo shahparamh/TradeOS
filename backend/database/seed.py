@@ -31,8 +31,6 @@ def seed_agents():
             agents_to_add.append(Agent(name="Groq-Llama", provider="groq", model_name=settings.GROQ_MODEL, cash_balance=settings.INITIAL_CAPITAL))
         if "GitHub Model" not in existing_agents:
             agents_to_add.append(Agent(name="GitHub Model", provider="github", model_name=settings.GITHUB_MODEL, cash_balance=settings.INITIAL_CAPITAL))
-        if "HuggingFace Model" not in existing_agents:
-            agents_to_add.append(Agent(name="HuggingFace Model", provider="huggingface", model_name=settings.HF_MODEL, cash_balance=settings.INITIAL_CAPITAL))
         if "Local-Ollama" not in existing_agents:
             agents_to_add.append(Agent(name="Local-Ollama", provider="ollama", model_name=settings.OLLAMA_MODEL, cash_balance=settings.INITIAL_CAPITAL))
             

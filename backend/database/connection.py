@@ -1,5 +1,6 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy.pool import NullPool
 from config import settings
 
 # Only use check_same_thread for SQLite databases
@@ -10,8 +11,7 @@ engine_kwargs = {
     "connect_args": connect_args
 }
 if "sqlite" not in settings.DATABASE_URL:
-    engine_kwargs["pool_pre_ping"] = True
-    engine_kwargs["pool_recycle"] = 300
+    engine_kwargs["poolclass"] = NullPool
 
 engine = create_engine(settings.DATABASE_URL, **engine_kwargs)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)

@@ -38,7 +38,8 @@ def get_agent_detail(agent_id: int, db: Session = Depends(get_db)):
     all_trades = agent.trades or []
     closed = [t for t in all_trades if t.pnl is not None]
     wins = [t for t in closed if t.pnl > 0]
-    today = datetime.utcnow().date()
+    from utils.helpers import get_ist_now
+    today = get_ist_now().date()
     today_trades = [t for t in all_trades if t.entry_time and t.entry_time.date() == today]
 
     return {

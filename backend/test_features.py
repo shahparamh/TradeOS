@@ -33,6 +33,15 @@ class TestTradeOSFeatures(unittest.TestCase):
         # Instantiate DB session
         cls.db = SessionLocal()
         
+        # Ensure equity trading is enabled for the test cases
+        eq_rule = cls.db.query(SystemRule).filter(SystemRule.key == "enable_equity_trading").first()
+        if not eq_rule:
+            eq_rule = SystemRule(key="enable_equity_trading", value_type="boolean", bool_value=True)
+            cls.db.add(eq_rule)
+        else:
+            eq_rule.bool_value = True
+        cls.db.commit()
+        
         # Setup Test Agent
         cls.agent = cls.db.query(Agent).first()
         if not cls.agent:
