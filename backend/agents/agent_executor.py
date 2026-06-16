@@ -211,7 +211,7 @@ async def execute_all_agents(
                 recent_perf_str += "\n\nRECENT PERFORMANCE (last 5 closed trades for your model):\n"
                 for t in closed_trades:
                     outcome = "WIN" if (t.pnl and t.pnl > 0) else "LOSS"
-                    recent_perf_str += f"- Trade {t.id} on {t.symbol}: {t.decision} at {t.entry_price}, exit at {t.exit_price}. Outcome: {outcome} (PnL: ₹{t.pnl:.2f}).\n"
+                    recent_perf_str += f"- Trade {t.id} on {t.symbol}: {t.action} at {t.entry_price}, exit at {t.exit_price}. Outcome: {outcome} (PnL: ₹{t.pnl:.2f}).\n"
                 recent_perf_str += "Adjust your entry threshold: require higher confluence and PCR support if recent performance is sub-optimal."
 
             agent_states[agent.name] = {
@@ -236,7 +236,6 @@ async def execute_all_agents(
         for agent in agents:
             from database.models import Trade, SystemRule, Position
             from datetime import date
-            from utils.helpers import get_ist_now
             
             # 1. Open Position Check: If the agent already has a position in this symbol, skip LLM call!
             has_pos = db.query(Position).filter(

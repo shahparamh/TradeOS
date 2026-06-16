@@ -51,16 +51,22 @@ class OpportunityScanner:
         price_vs_ema20 = stock["price_vs_ema20"]
         price_vs_vwap = stock["price_vs_vwap"]
 
+        is_index = symbol.startswith("^")
+        vol_check = True if is_index else (vol_ratio > 1.5)
+        vwap_check = True if is_index else (price_vs_vwap == "above")
+        rsi_lower = 45 if is_index else 55
+        rsi_upper = 85 if is_index else 80
+
         if (price_vs_ema20 == "above" and
-            price_vs_vwap == "above" and
-            vol_ratio > 1.5 and
-            55 < rsi < 80 and
+            vwap_check and
+            vol_check and
+            rsi_lower < rsi < rsi_upper and
             macd == "bullish"):
 
             reasons = [
                 f"Price above 20 EMA ({stock['ema_20']})",
-                f"Price above VWAP ({stock['vwap']})",
-                f"Volume {vol_ratio}x average",
+                f"Price above VWAP ({stock['vwap']})" if not is_index else "Price in bullish trend (index)",
+                f"Volume {vol_ratio}x average" if not is_index else "Volume check bypassed (index)",
                 f"RSI at {rsi} (bullish momentum)",
                 f"MACD bullish crossover"
             ]
@@ -69,7 +75,7 @@ class OpportunityScanner:
             if stock["price_vs_ema50"] == "above":
                 boosters += 1
                 reasons.append(f"Price above 50 EMA ({stock['ema_50']})")
-            if vol_ratio > 2.5:
+            if not is_index and vol_ratio > 2.5:
                 boosters += 1
                 reasons.append(f"Extreme volume spike ({vol_ratio}x)")
 
@@ -87,14 +93,22 @@ class OpportunityScanner:
         return []
 
     def scan_bearish_breakdown(self, stock: dict, news: list) -> list[dict]:
+        symbol = stock["symbol"]
+        is_index = symbol.startswith("^")
+        vol_check = True if is_index else (stock["volume_ratio"] > 1.5)
+        vwap_check = True if is_index else (stock["price_vs_vwap"] == "below")
+        rsi_upper = 55 if is_index else 45
+
         if (stock["price_vs_ema20"] == "below" and
-            stock["price_vs_vwap"] == "below" and
-            stock["volume_ratio"] > 1.5 and
-            stock["rsi"] < 45 and
+            vwap_check and
+            vol_check and
+            stock["rsi"] < rsi_upper and
             stock["macd"] == "bearish"):
             
             strength = "moderate"
-            reasons = ["Price broke below 20 EMA and VWAP with volume"]
+            reasons = [
+                "Price broke below 20 EMA and VWAP with volume" if not is_index else "Price broke below 20 EMA (index)"
+            ]
             
             # Check news for negative sentiment
             has_negative_news = any(n.get("sentiment") == "negative" for n in news)
@@ -167,24 +181,29 @@ class OpportunityScanner:
         return []
 
     def scan_mean_reversion(self, stock: dict) -> list[dict]:
-        if stock["bb_position"] == "oversold" and stock["rsi"] < 35 and stock["volume_ratio"] < 1.0:
+        symbol = stock["symbol"]
+        is_index = symbol.startswith("^")
+        vol_check_oversold = True if is_index else (stock["volume_ratio"] < 1.0)
+        vol_check_overbought = True if is_index else (stock["volume_ratio"] < 1.0)
+
+        if stock["bb_position"] == "oversold" and stock["rsi"] < 35 and vol_check_oversold:
             return [{
                 "symbol": stock["symbol"],
                 "signal_type": "bullish_mean_reversion",
                 "signal_strength": "moderate",
                 "suggested_action": "BUY",
                 "suggested_position": "LONG",
-                "reasons": ["Price over-extended to downside, volume drying up"],
+                "reasons": ["Price over-extended to downside" if is_index else "Price over-extended to downside, volume drying up"],
                 "indicators": stock
             }]
-        elif stock["bb_position"] == "overbought" and stock["rsi"] > 70 and stock["volume_ratio"] < 1.0:
+        elif stock["bb_position"] == "overbought" and stock["rsi"] > 70 and vol_check_overbought:
             return [{
                 "symbol": stock["symbol"],
                 "signal_type": "bearish_mean_reversion",
                 "signal_strength": "moderate",
                 "suggested_action": "SHORT",
                 "suggested_position": "SHORT",
-                "reasons": ["Price over-extended to upside, volume drying up"],
+                "reasons": ["Price over-extended to upside" if is_index else "Price over-extended to upside, volume drying up"],
                 "indicators": stock
             }]
         return []

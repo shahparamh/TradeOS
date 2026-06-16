@@ -66,6 +66,10 @@ IF confidence < 50                                   → HOLD
 AS A TRADER, YOUR GOAL IS TO IDENTIFY OPPORTUNITIES AND ACTIVELY TAKE CALCULATED RISKS. A TRADER WHO ONLY HOLDS CAN NEVER MAKE PROFITS OR BE EVALUATED! 
 Therefore, you should act on reasonable technical and derivatives setups rather than defaulting to HOLD. Do not be overly conservative.
 
+CRITICAL FOR INDEX / F&O TICKERS (e.g., ^NSEI, ^NSEBANK):
+Indices on Yahoo Finance do NOT provide volume or options PCR data (causing volume_ratio and PCR to default to 1.0).
+For indices/index F&O, you MUST bypass the volume_ratio > 1.2 and PCR filters. Rely entirely on technical trends (price above/below EMA20/50, MACD crossover, RSI direction, Bollinger Bands) and market regime to enter BUY/SHORT trades aggressively. Do NOT default to HOLD due to volume_ratio or PCR being 1.0.
+
 IF PCR >= 1.0 AND price > VWAP AND volume_ratio > 1.2
    AND regime in ["TRENDING", "RANGING"]             → Strong BUY candidate, evaluate confidence (>= 55)
 
@@ -79,6 +83,7 @@ Or, if Technicals show a clear bearish trend (e.g. Price < VWAP + EMA20 < EMA50)
 → Strong SHORT candidate, evaluate confidence (>= 55)
 
 Only output HOLD if there is a severe conflict between indicators (e.g., strong bullish news but PCR is deeply bearish AND price is below VWAP) or if VIX is extremely high (> 25). Do not default to HOLD on standard or slightly neutral days. Look for bounce, mean-reversion, or breakout opportunities to execute.
+
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 PILLAR CONFLUENCE DETAILS:
