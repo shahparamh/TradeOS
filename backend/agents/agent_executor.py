@@ -298,6 +298,20 @@ async def execute_all_agents(
             decision["ignore_hours"] = ignore_hours
             decision["symbol"] = opportunity.get("symbol")
 
+            # Coerce trade_type for F&O/Indices if model returns equity trade type
+            symbol = opportunity.get("symbol", "")
+            is_symbol_fno = symbol.startswith("^") or symbol in ["NIFTY", "BANKNIFTY", "FINNIFTY"]
+            if is_symbol_fno:
+                orig_type = decision.get("trade_type", "INTRADAY")
+                if orig_type in ["INTRADAY", "SWING"]:
+                    pos_type = decision.get("position_type", "")
+                    if pos_type in ["BUY_CE", "BUY_PE", "SELL_CE", "SELL_PE"]:
+                        decision["trade_type"] = "OPTIONS"
+                    else:
+                        decision["trade_type"] = "FUTURES"
+                        if pos_type not in ["LONG", "SHORT"]:
+                            decision["position_type"] = "LONG" if decision.get("decision") == "BUY" else "SHORT"
+
 
             # Save AI response
             ai_response = AIResponse(
