@@ -267,19 +267,20 @@ def fetch_option_greeks_and_fii(symbol: str) -> dict:
         
         # Calculate actual days to earnings
         days_to_earnings = 90
-        try:
-            calendar = rate_limited_call(lambda: ticker.calendar)
-            if calendar is not None and not calendar.empty and 'Earnings Date' in calendar.index:
-                # yfinance calendar returns a dictionary/series often with 'Earnings Date' as index containing list of dates
-                earnings_dates = calendar.loc['Earnings Date']
-                if isinstance(earnings_dates, list) and len(earnings_dates) > 0:
-                    import datetime
-                    next_earning = earnings_dates[0].date()
-                    delta = (next_earning - datetime.date.today()).days
-                    if delta >= 0:
-                        days_to_earnings = delta
-        except Exception as e:
-            logger.warning(f"Could not calculate earnings date for {symbol}: {e}")
+        if not symbol.startswith("^"):
+            try:
+                calendar = rate_limited_call(lambda: ticker.calendar)
+                if calendar is not None and isinstance(calendar, pd.DataFrame) and not calendar.empty and 'Earnings Date' in calendar.index:
+                    # yfinance calendar returns a dictionary/series often with 'Earnings Date' as index containing list of dates
+                    earnings_dates = calendar.loc['Earnings Date']
+                    if isinstance(earnings_dates, list) and len(earnings_dates) > 0:
+                        import datetime
+                        next_earning = earnings_dates[0].date()
+                        delta = (next_earning - datetime.date.today()).days
+                        if delta >= 0:
+                            days_to_earnings = delta
+            except Exception as e:
+                logger.warning(f"Could not calculate earnings date for {symbol}: {e}")
         
         return {
             "atm_call_delta": round(call_delta, 2),
