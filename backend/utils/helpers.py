@@ -28,3 +28,4 @@ def format_currency(amount):
 
 def parse_ist_time(t_str):
     return datetime.strptime(t_str, "%H:%M").time()
+

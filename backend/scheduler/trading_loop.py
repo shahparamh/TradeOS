@@ -239,7 +239,7 @@ class TradingScheduler:
                         continue
                         
                     logger.info(f"Scanning {symbol}...")
-                    candles_df = fetch_intraday_candles(symbol, "5m", "5d")
+                    candles_df = await asyncio.to_thread(fetch_intraday_candles, symbol, "5m", "5d")
                     if candles_df.empty:
                         continue
                     
@@ -257,12 +257,12 @@ class TradingScheduler:
                     
                     # Fetch stock-specific fundamental metrics (P/E, ROE, 52W High/Low, Sector)
                     from data.fundamentals_fetcher import fetch_yf_fundamentals
-                    fundamentals = fetch_yf_fundamentals(symbol)
+                    fundamentals = await asyncio.to_thread(fetch_yf_fundamentals, symbol)
                     
                     # Fetch Derivatives Option Chain Open Interest (OI) & PCR (Put-Call Ratio)
                     # If OI fetch fails due to rate limiting, scanner will still work with other indicators
                     from data.market_fetcher import fetch_option_oi_metrics
-                    oi_metrics = fetch_option_oi_metrics(symbol)
+                    oi_metrics = await asyncio.to_thread(fetch_option_oi_metrics, symbol)
                     if not oi_metrics.get("total_call_oi", 0) and not oi_metrics.get("total_put_oi", 0):
                         logger.debug(f"No OI data for {symbol}—proceeding without derivatives metrics.")
                     
@@ -275,7 +275,7 @@ class TradingScheduler:
                     if enable_news_bool:
                         try:
                             from data.news_fetcher import fetch_all_news_for_stock
-                            news_payload = fetch_all_news_for_stock(symbol) or []
+                            news_payload = await asyncio.to_thread(fetch_all_news_for_stock, symbol) or []
                         except Exception as e:
                             logger.error(f"Failed to fetch news for {symbol}: {e}")
                             
@@ -426,7 +426,7 @@ class TradingScheduler:
                 # Fetch recent news to pass into LLM context
                 news = []
                 try:
-                    news = fetch_all_news_for_stock(symbol)
+                    news = await asyncio.to_thread(fetch_all_news_for_stock, symbol)
                 except Exception as ne:
                     logger.warning(f"Failed to fetch news for {symbol}: {ne}")
                     
