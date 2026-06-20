@@ -155,6 +155,8 @@ class TradingScheduler:
 
     async def run_trading_cycle(self, ignore_hours: bool = False):
         """Executes the full trading pipeline."""
+        from datetime import datetime, timezone, timedelta
+        
         if self.is_running_cycle:
             if self.cycle_start_time and (datetime.now() - self.cycle_start_time).total_seconds() > 300:
                 logger.warning("Previous cycle timed out (5 mins exceeded). Forcing new cycle.")
@@ -163,7 +165,6 @@ class TradingScheduler:
                 logger.warning("Cycle already in progress, skipping...")
                 return
             
-        from datetime import datetime, timezone, timedelta
         ist = timezone(timedelta(hours=5, minutes=30))
         now = datetime.now(ist)
         
@@ -203,7 +204,7 @@ class TradingScheduler:
             enable_equity_bool = enable_equity.bool_value if enable_equity else True
             
             enable_fno = db.query(SystemRule).filter(SystemRule.key == "enable_fno_trading").first()
-            enable_fno_bool = enable_fno.bool_value if enable_fno else True
+            enable_fno_bool = False # Temporarily disabled FNO trading
 
             equity_cooldown = db.query(SystemRule).filter(SystemRule.key == "equity_ai_cooldown_min").first()
             equity_cooldown_min = float(equity_cooldown.numeric_value) if equity_cooldown else 30.0
@@ -401,7 +402,7 @@ class TradingScheduler:
             enable_equity_bool = enable_equity.bool_value if enable_equity else True
             
             enable_fno = db.query(SystemRule).filter(SystemRule.key == "enable_fno_trading").first()
-            enable_fno_bool = enable_fno.bool_value if enable_fno else True
+            enable_fno_bool = False # Temporarily disabled FNO trading
             
             from agents.prompts import PRE_MARKET_SYSTEM_PROMPT, build_pre_market_payload
             from data.news_fetcher import fetch_all_news_for_stock
