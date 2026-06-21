@@ -1,0 +1,21 @@
+name: Keep Render App Alive
+
+on:
+  schedule:
+    # Runs every 10 minutes
+    - cron: '*/10 * * * *'
+  # Allows manual triggering from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  keep-alive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping health endpoint
+        run: |
+          if [ -n "${{ secrets.RENDER_BACKEND_URL }}" ]; then
+            curl -f "${{ secrets.RENDER_BACKEND_URL }}/api/health" || exit 1
+          else
+            echo "Error: RENDER_BACKEND_URL secret is not set in GitHub repository settings."
+            exit 1
+          fi

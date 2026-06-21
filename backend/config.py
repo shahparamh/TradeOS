@@ -22,6 +22,9 @@ class Settings:
     # Database
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./tradeos.db")
 
+    # Render Keep-Alive / External Backend URL
+    BACKEND_URL: str = os.getenv("BACKEND_URL", "")
+
     # Trading
     INITIAL_CAPITAL: float = float(os.getenv("INITIAL_CAPITAL", 5000000.0))
     MAX_CAPITAL_PER_TRADE: float = float(os.getenv("MAX_CAPITAL_PER_TRADE", 0.20))

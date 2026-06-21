@@ -108,8 +108,38 @@ class TradingScheduler:
             replace_existing=True
         )
 
+        # 5. Render Keep-Alive - Every 10 mins (only if BACKEND_URL is set)
+        from config import settings
+        if settings.BACKEND_URL:
+            self.scheduler.add_job(
+                self.ping_self,
+                "interval",
+                minutes=10,
+                id="keep_alive_job",
+                name="Keep Render App Alive",
+                replace_existing=True
+            )
+            logger.info(f"Scheduled keep-alive ping for backend: {settings.BACKEND_URL}")
+
         self.scheduler.start()
         logger.info("TradeOS Scheduler started.")
+
+    async def ping_self(self):
+        """Pings own health endpoint externally to keep the Render container awake."""
+        from config import settings
+        import httpx
+        if not settings.BACKEND_URL:
+            return
+        url = f"{settings.BACKEND_URL.rstrip('/')}/api/health"
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, timeout=10.0)
+                if response.status_code == 200:
+                    logger.info(f"[Keep-Alive] Self-ping successful: {response.json()}")
+                else:
+                    logger.warning(f"[Keep-Alive] Self-ping returned status code: {response.status_code}")
+        except Exception as e:
+            logger.error(f"[Keep-Alive] Self-ping failed: {e}")
 
     async def run_monitor_cycle(self, ignore_hours: bool = False):
         """Runs the position monitor to check for SL/TP hits."""
