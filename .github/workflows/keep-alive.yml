@@ -10,6 +10,7 @@ on:
 jobs:
   keep-alive:
     runs-on: ubuntu-latest
+    environment: BACKEND_URL
     steps:
       - name: Ping health endpoint
         run: |
