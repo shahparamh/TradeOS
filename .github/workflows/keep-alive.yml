@@ -13,9 +13,18 @@ jobs:
     steps:
       - name: Ping health endpoint
         run: |
-          if [ -n "${{ secrets.RENDER_BACKEND_URL }}" ]; then
-            curl -f "${{ secrets.RENDER_BACKEND_URL }}/api/health" || exit 1
+          URL="${{ secrets.RENDER_BACKEND_URL }}"
+          if [ -z "$URL" ]; then
+            URL="${{ vars.RENDER_BACKEND_URL }}"
+          fi
+          
+          if [ -n "$URL" ]; then
+            # Strip trailing slash if present
+            CLEAN_URL="${URL%/}"
+            curl -f "$CLEAN_URL/api/health" || exit 1
           else
-            echo "Error: RENDER_BACKEND_URL secret is not set in GitHub repository settings."
+            echo "Error: RENDER_BACKEND_URL is not set in GitHub Settings."
+            echo "Please ensure RENDER_BACKEND_URL is configured in your repository settings under:"
+            echo "Settings -> Secrets and variables -> Actions (as either a Secret or a Variable)"
             exit 1
           fi
