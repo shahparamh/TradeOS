@@ -17,14 +17,19 @@ jobs:
           if [ -z "$URL" ]; then
             URL="${{ vars.RENDER_BACKEND_URL }}"
           fi
+          if [ -z "$URL" ]; then
+            URL="${{ secrets.BACKEND_URL }}"
+          fi
+          if [ -z "$URL" ]; then
+            URL="${{ vars.BACKEND_URL }}"
+          fi
           
           if [ -n "$URL" ]; then
             # Strip trailing slash if present
             CLEAN_URL="${URL%/}"
             curl -f "$CLEAN_URL/api/health" || exit 1
           else
-            echo "Error: RENDER_BACKEND_URL is not set in GitHub Settings."
-            echo "Please ensure RENDER_BACKEND_URL is configured in your repository settings under:"
-            echo "Settings -> Secrets and variables -> Actions (as either a Secret or a Variable)"
+            echo "Error: Neither RENDER_BACKEND_URL nor BACKEND_URL is set in Repository settings."
+            echo "Please ensure the variable is defined under Repository variables (the section at the bottom of your image)."
             exit 1
           fi
