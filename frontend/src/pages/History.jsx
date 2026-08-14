@@ -30,11 +30,11 @@ const HistoryRow = ({ trade }) => {
                         <span>{trade.agent_name || (trade.agent_id === 1 ? 'Gemini' : 'Groq')}</span>
                     </div>
                 </td>
-                <td className="mono symbol-col">{trade.symbol.replace('.NS', '')}</td>
+                <td className="mono symbol-col">{(trade.symbol || '').replace('.NS', '')}</td>
                 <td>
-                    <span className={`side-tag ${trade.position_type?.toLowerCase()}`}>
+                    <span className={`side-tag ${(trade.position_type || '').toLowerCase()}`}>
                         {trade.position_type === 'LONG' ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
-                        {trade.position_type}
+                        {trade.position_type || 'LONG'}
                     </span>
                 </td>
                 <td className="mono">₹{trade.entry_price?.toLocaleString('en-IN')}</td>
@@ -95,14 +95,28 @@ const History = () => {
     const [searchTerm, setSearchTerm] = useState('');
     const [filter, setFilter] = useState('ALL');
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+
+    const loadTrades = () => {
+        setLoading(true);
+        setError(null);
+        brokerAPI.getTrades()
+            .then(res => { 
+                setTrades(Array.isArray(res.data) ? res.data : []); 
+                setLoading(false); 
+            })
+            .catch(err => { 
+                console.error("Failed to load trade history:", err);
+                setError(err.message || "Failed to fetch trades from server");
+                setLoading(false); 
+            });
+    };
 
     useEffect(() => {
-        brokerAPI.getTrades()
-            .then(res => { setTrades(res.data); setLoading(false); })
-            .catch(() => setLoading(false));
+        loadTrades();
     }, []);
 
-    const closed = trades.filter(t => t.pnl !== null && t.pnl !== undefined);
+    const closed = (trades || []).filter(t => t.pnl !== null && t.pnl !== undefined);
     const stats = {
         total: trades.length,
         wins: closed.filter(t => t.pnl > 0).length,
@@ -111,9 +125,11 @@ const History = () => {
     };
     const winRate = closed.length > 0 ? ((stats.wins / closed.length) * 100).toFixed(1) : 0;
 
-    const filtered = trades.filter(t => {
-        const matchSearch = t.symbol.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            (t.agent_name || '').toLowerCase().includes(searchTerm.toLowerCase());
+    const filtered = (trades || []).filter(t => {
+        const symbol = (t.symbol || '').toLowerCase();
+        const agentName = (t.agent_name || '').toLowerCase();
+        const query = searchTerm.toLowerCase();
+        const matchSearch = symbol.includes(query) || agentName.includes(query);
         const matchFilter = filter === 'ALL' || t.position_type === filter || 
             (filter === 'OPEN' && !t.exit_price) || (filter === 'CLOSED' && t.exit_price);
         return matchSearch && matchFilter;
@@ -181,6 +197,11 @@ const History = () => {
 
                 {loading ? (
                     <div className="table-loading">Loading trade history...</div>
+                ) : error ? (
+                    <div className="table-empty" style={{ color: 'var(--loss-red)', gap: '12px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                        <span>Error loading trade history: {error}</span>
+                        <button className="btn-primary" onClick={loadTrades} style={{ padding: '6px 16px', fontSize: '13px' }}>Retry</button>
+                    </div>
                 ) : filtered.length === 0 ? (
                     <div className="table-empty">No trades match your filter.</div>
                 ) : (

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from database.connection import get_db
 from database.models import Trade, Position, Agent, DailyPerformance
 from data.market_fetcher import fetch_live_price
@@ -11,14 +11,13 @@ router = APIRouter(prefix="/broker", tags=["Broker & Risk"])
 
 @router.get("/trades", response_model=None)
 def get_all_trades(db: Session = Depends(get_db)):
-    trades = db.query(Trade).order_by(Trade.entry_time.desc()).all()
+    trades = db.query(Trade).options(joinedload(Trade.agent)).order_by(Trade.entry_time.desc()).all()
     result = []
     for t in trades:
-        agent = db.query(Agent).get(t.agent_id)
         result.append({
             "id": t.id,
             "agent_id": t.agent_id,
-            "agent_name": agent.name if agent else "Unknown",
+            "agent_name": t.agent.name if t.agent else "Unknown",
             "symbol": t.symbol,
             "action": t.action,
             "trade_type": t.trade_type or "INTRADAY",
@@ -40,10 +39,9 @@ def get_all_trades(db: Session = Depends(get_db)):
 
 @router.get("/positions", response_model=None)
 def get_all_positions(db: Session = Depends(get_db)):
-    positions = db.query(Position).all()
+    positions = db.query(Position).options(joinedload(Position.agent)).all()
     result = []
     for pos in positions:
-        agent = db.query(Agent).get(pos.agent_id)
         # Load the last known price directly from the database to prevent Yahoo Finance timeout!
         current_price = pos.current_price
 
@@ -56,7 +54,7 @@ def get_all_positions(db: Session = Depends(get_db)):
         result.append({
             "id": pos.id,
             "agent_id": pos.agent_id,
-            "agent_name": agent.name if agent else "Unknown",
+            "agent_name": pos.agent.name if pos.agent else "Unknown",
             "trade_id": pos.trade_id,
             "symbol": pos.symbol,
             "trade_type": pos.trade_type or "INTRADAY",
@@ -75,7 +73,7 @@ def get_all_positions(db: Session = Depends(get_db)):
 @router.get("/leaderboard")
 def get_leaderboard(db: Session = Depends(get_db)):
     try:
-        agents = db.query(Agent).all()
+        agents = db.query(Agent).options(joinedload(Agent.trades)).all()
         leaderboard = []
         COLOR_MAP = {
             "gemini": "var(--color-gemini)",
@@ -88,7 +86,6 @@ def get_leaderboard(db: Session = Depends(get_db)):
             "local": "var(--green-profit)",
             "ollama": "var(--green-profit)",
         }
-
 
         for agent in agents:
             all_trades = agent.trades or []

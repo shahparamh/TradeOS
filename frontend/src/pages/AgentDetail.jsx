@@ -172,7 +172,7 @@ const AgentDetail = () => {
                                 <tbody>
                                     {recentTrades.map(t => (
                                         <tr key={t.id}>
-                                            <td className="mono fw-bold">{t.symbol.replace('.NS', '')}</td>
+                                            <td className="mono fw-bold">{(t.symbol || '').replace('.NS', '')}</td>
                                             <td>
                                                 <span className={`side-tag ${t.position_type?.toLowerCase()}`}>
                                                     {t.position_type}

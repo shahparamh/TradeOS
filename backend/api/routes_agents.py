@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from database.connection import get_db
 from database.models import Agent, Trade
 from datetime import datetime
@@ -9,7 +9,7 @@ router = APIRouter(prefix="/agents", tags=["AI Agents"])
 
 @router.get("/")
 def get_all_agents(db: Session = Depends(get_db)):
-    agents = db.query(Agent).all()
+    agents = db.query(Agent).options(joinedload(Agent.trades)).all()
     result = []
     for agent in agents:
         all_trades = agent.trades or []
