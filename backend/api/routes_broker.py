@@ -5,6 +5,7 @@ from database.connection import get_db
 from database.models import Trade, Position, Agent, DailyPerformance
 from data.market_fetcher import fetch_live_price
 from utils.helpers import get_ist_now
+from config import settings
 
 router = APIRouter(prefix="/broker", tags=["Broker & Risk"])
 
@@ -13,6 +14,27 @@ router = APIRouter(prefix="/broker", tags=["Broker & Risk"])
 def get_all_trades(db: Session = Depends(get_db)):
     trades = db.query(Trade).options(joinedload(Trade.agent)).order_by(Trade.entry_time.desc()).all()
     result = []
+
+    def _is_bullish_position(position_type: str | None) -> bool:
+        return (position_type or "").upper() in ["LONG", "BUY_CE", "SELL_PE"]
+
+    def _estimate_exit_market_price(trade: Trade):
+        if trade.exit_price is None:
+            return None
+
+        slip = float(settings.SLIPPAGE_PERCENT or 0)
+        if slip <= 0:
+            return round(float(trade.exit_price), 2)
+
+        if _is_bullish_position(trade.position_type):
+            # Bullish exits sell/close slightly below market due to slippage.
+            estimated_market = float(trade.exit_price) / (1 - slip)
+        else:
+            # Bearish exits cover slightly above market due to slippage.
+            estimated_market = float(trade.exit_price) / (1 + slip)
+
+        return round(estimated_market, 2)
+
     for t in trades:
         result.append({
             "id": t.id,
@@ -25,6 +47,7 @@ def get_all_trades(db: Session = Depends(get_db)):
             "quantity": t.quantity,
             "entry_price": t.entry_price,
             "exit_price": t.exit_price,
+            "exit_market_price": _estimate_exit_market_price(t),
             "stop_loss": t.stop_loss,
             "target_price": t.target_price,
             "pnl": t.pnl,
@@ -40,6 +63,16 @@ def get_all_trades(db: Session = Depends(get_db)):
 @router.get("/positions", response_model=None)
 def get_all_positions(db: Session = Depends(get_db)):
     positions = db.query(Position).options(joinedload(Position.agent)).all()
+    position_trade_ids = {p.trade_id for p in positions if p.trade_id is not None}
+
+    # Defensive fallback: if an OPEN trade lost its Position row unexpectedly,
+    # surface it in live positions instead of hiding it from the UI.
+    orphan_open_trades = db.query(Trade).options(joinedload(Trade.agent)).filter(
+        Trade.status == "OPEN",
+        Trade.exit_time.is_(None),
+        ~Trade.id.in_(position_trade_ids) if position_trade_ids else True,
+    ).all()
+
     result = []
     for pos in positions:
         # Load the last known price directly from the database to prevent Yahoo Finance timeout!
@@ -67,6 +100,31 @@ def get_all_positions(db: Session = Depends(get_db)):
             "unrealized_pnl": round(unrealized, 2),
             "opened_at": pos.opened_at.isoformat() if pos.opened_at else None,
         })
+
+    for trade in orphan_open_trades:
+        current_price = trade.entry_price
+        if trade.position_type in ["LONG", "BUY_CE", "SELL_PE"]:
+            unrealized = (current_price - trade.entry_price) * trade.quantity
+        else:
+            unrealized = (trade.entry_price - current_price) * trade.quantity
+
+        result.append({
+            "id": f"orphan-{trade.id}",
+            "agent_id": trade.agent_id,
+            "agent_name": trade.agent.name if trade.agent else "Unknown",
+            "trade_id": trade.id,
+            "symbol": trade.symbol,
+            "trade_type": trade.trade_type or "INTRADAY",
+            "position_type": trade.position_type or ("LONG" if trade.action == "BUY" else "SHORT"),
+            "quantity": trade.quantity,
+            "entry_price": trade.entry_price,
+            "current_price": round(current_price, 2),
+            "stop_loss": trade.stop_loss,
+            "target_price": trade.target_price,
+            "unrealized_pnl": round(unrealized, 2),
+            "opened_at": trade.entry_time.isoformat() if trade.entry_time else None,
+        })
+
     return result
 
 

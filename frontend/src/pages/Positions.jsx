@@ -10,11 +10,17 @@ import toast from 'react-hot-toast';
 const PositionCard = ({ pos, onRefresh, onViewChart }) => {
     const pnl = pos.unrealized_pnl || 0;
     const isProfit = pnl >= 0;
+    const isOrphan = typeof pos.id === 'string' && pos.id.startsWith('orphan-');
     const invested = pos.entry_price * pos.quantity;
     const pnlPercent = invested > 0 ? ((pnl / invested) * 100).toFixed(2) : '0.00';
     const isNearSL = pos.stop_loss && Math.abs(pos.current_price - pos.stop_loss) / pos.current_price < 0.01;
 
     const handleClose = async () => {
+        if (isOrphan) {
+            toast.error('This position was recovered from OPEN trades. Auto-monitor will close it.');
+            return;
+        }
+
         if (window.confirm(`Square off ${pos.symbol} at ₹${pos.current_price}?`)) {
             try {
                 const res = await brokerAPI.closePosition(pos.id);
@@ -43,9 +49,9 @@ const PositionCard = ({ pos, onRefresh, onViewChart }) => {
                     <span className={`pos-type-badge ${pos.position_type.toLowerCase()}`}>{pos.position_type}</span>
                     <BarChart2 size={13} style={{ marginLeft: 6, color: 'var(--accent-cyan)' }} />
                 </div>
-                <button className="close-btn" onClick={handleClose} title="Manual Square Off">
+                <button className="close-btn" onClick={handleClose} title={isOrphan ? 'Recovered OPEN trade' : 'Manual Square Off'}>
                     <XCircle size={18} />
-                    <span>Square Off</span>
+                    <span>{isOrphan ? 'Recovered' : 'Square Off'}</span>
                 </button>
             </div>
 
@@ -209,7 +215,9 @@ const Positions = () => {
                         setPositions(prevPositions => prevPositions.map(pos => {
                             if (pos.symbol === tick.symbol) {
                                 const priceVal = Number(tick.price);
-                                const pnlVal = (pos.position_type === 'BUY') 
+                                const bullishTypes = ['LONG', 'BUY_CE', 'SELL_PE'];
+                                const isBullish = bullishTypes.includes((pos.position_type || '').toUpperCase());
+                                const pnlVal = isBullish
                                     ? (priceVal - pos.entry_price) * pos.quantity
                                     : (pos.entry_price - priceVal) * pos.quantity;
                                 return {

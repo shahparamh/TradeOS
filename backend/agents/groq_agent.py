@@ -15,6 +15,16 @@ logger = setup_logger("agent_groq")
 
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
+GROQ_STRATEGY_OVERLAY = """
+MODEL-SPECIFIC STRATEGY LOCK (Groq-Llama):
+- Follow one stable trend-confluence framework throughout the day; do not frequently switch strategy style.
+- Prioritize momentum continuation only when VWAP and EMA structure agree; otherwise HOLD.
+- For mean-reversion, require explicit Bollinger or RSI extreme plus reversal confirmation.
+- If confidence drops, lower size first instead of changing the underlying strategy logic.
+- Enforce high-quality trade selection: confidence >= 70, risk-reward >= 2.0, and expected target move >= 1.5%.
+- Do not force trades in choppy structure; HOLD is preferred when confluence is weak.
+"""
+
 
 async def query_groq(payload: str, system_prompt: str = SYSTEM_PROMPT) -> dict:
     """
@@ -41,10 +51,12 @@ async def query_groq(payload: str, system_prompt: str = SYSTEM_PROMPT) -> dict:
         "Authorization": f"Bearer {api_key}",
     }
 
+    effective_prompt = f"{system_prompt}\n\n{GROQ_STRATEGY_OVERLAY}"
+
     body = {
         "model": settings.GROQ_MODEL,
         "messages": [
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": effective_prompt},
             {"role": "user", "content": payload},
         ],
         "temperature": 0.3,
