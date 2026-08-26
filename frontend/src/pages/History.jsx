@@ -8,7 +8,7 @@ import { brokerAPI } from '../services/api';
 const HistoryRow = ({ trade }) => {
     const [expanded, setExpanded] = useState(false);
     const isProfit = (trade.pnl || 0) > 0;
-    const isOpen = !trade.exit_price;
+    const isOpen = (trade.status || '').toUpperCase() === 'OPEN' || (!trade.exit_price && trade.pnl === null);
 
     const agentColor = {
         1: 'var(--color-gemini)',
@@ -38,7 +38,14 @@ const HistoryRow = ({ trade }) => {
                     </span>
                 </td>
                 <td className="mono">₹{trade.entry_price?.toLocaleString('en-IN')}</td>
-                <td className="mono">{trade.exit_price ? `₹${trade.exit_price?.toLocaleString('en-IN')}` : <span className="open-badge">OPEN</span>}</td>
+                <td className="mono">
+                    {trade.exit_price ? (
+                        <span title={trade.exit_market_price ? `Exit market: ₹${trade.exit_market_price?.toLocaleString('en-IN')}` : ''}>
+                            ₹{trade.exit_price?.toLocaleString('en-IN')}
+                            {trade.exit_market_price ? ` (MKT ₹${trade.exit_market_price?.toLocaleString('en-IN')})` : ''}
+                        </span>
+                    ) : <span className="open-badge">OPEN</span>}
+                </td>
                 <td className={`mono fw-bold ${isOpen ? '' : isProfit ? 'text-profit' : 'text-loss'}`}>
                     {isOpen ? '—' : `${isProfit ? '+' : ''}₹${trade.pnl?.toFixed(2)}`}
                 </td>
@@ -130,8 +137,9 @@ const History = () => {
         const agentName = (t.agent_name || '').toLowerCase();
         const query = searchTerm.toLowerCase();
         const matchSearch = symbol.includes(query) || agentName.includes(query);
+        const isOpen = (t.status || '').toUpperCase() === 'OPEN' || (!t.exit_price && t.pnl === null);
         const matchFilter = filter === 'ALL' || t.position_type === filter || 
-            (filter === 'OPEN' && !t.exit_price) || (filter === 'CLOSED' && t.exit_price);
+            (filter === 'OPEN' && isOpen) || (filter === 'CLOSED' && !isOpen);
         return matchSearch && matchFilter;
     });
 

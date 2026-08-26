@@ -3,14 +3,15 @@ WATCHLIST = [
     "^NSEI",
     "RELIANCE.NS",
     "HDFCBANK.NS",
-    "ICICIBANK.NS",
     "SBIN.NS",
     "INFY.NS",
     "TCS.NS",
     "HCLTECH.NS",
     "WIPRO.NS",
-    "SUNPHARMA.NS",
     "CIPLA.NS",
+    "VEDL.NS",
+    "DIVISLAB.NS",
+    "VBL.NS",
 ]
 
 

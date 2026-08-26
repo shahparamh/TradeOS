@@ -60,7 +60,7 @@ IF VIX > 25                                          → HOLD (hard override, no
 IF consecutive_losses >= 3 (from context)            → HOLD (cooldown rule)
 IF price already moved > 3% from open                → HOLD (no chasing)
 IF time > 14:00 IST and trade_type would be INTRADAY → HOLD (no late entries)
-IF pillars_aligned count < 2                         → HOLD
+IF pillars_aligned count < 3                         → HOLD
 IF confidence < 50                                   → HOLD
 
 AS A TRADER, YOUR GOAL IS TO IDENTIFY OPPORTUNITIES AND ACTIVELY TAKE CALCULATED RISKS. A TRADER WHO ONLY HOLDS CAN NEVER MAKE PROFITS OR BE EVALUATED! 
@@ -120,6 +120,7 @@ RISK & POSITION SIZING RULES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 - Stop-loss = 1.5× ATR from entry (hard rule). Must be within 2% of entry.
 - Target must yield minimum 1:1.5 risk-reward. Prefer 1:2 or better.
+- Reject micro-move trades: expected profit distance from entry to target must be at least 1.5%.
 - Target and Stop-Loss Orientation (CRITICAL):
     - For a BUY decision:
         - Target price MUST be strictly GREATER than entry price (Target >= Entry * 1.01).

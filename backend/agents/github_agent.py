@@ -16,6 +16,16 @@ logger = setup_logger("agent_github")
 
 GITHUB_API_URL = "https://models.inference.ai.azure.com/chat/completions"
 
+GITHUB_STRATEGY_OVERLAY = """
+MODEL-SPECIFIC STRATEGY LOCK (GitHub):
+- Use trend-confluence strategy consistently: prefer BUY when price > VWAP and EMA20 > EMA50; prefer SHORT when price < VWAP and EMA20 < EMA50.
+- Do not switch to a new strategy mid-session due to minor noise; require at least 2 aligned pillars before reversing directional bias.
+- If setup quality is moderate, reduce quantity rather than changing decision logic.
+- Keep behavior deterministic and avoid random strategy flips.
+- Reject low-quality micro setups: require confidence >= 70, risk-reward >= 2.0, and expected target move >= 1.5%.
+- Avoid late low-momentum entries; prioritize clean setups in strong liquidity windows.
+"""
+
 async def query_github(payload: str, system_prompt: str = SYSTEM_PROMPT) -> dict:
     """
     Sends market data payload to GitHub Models (GPT-4o) and returns a parsed trading decision.
@@ -41,10 +51,12 @@ async def query_github(payload: str, system_prompt: str = SYSTEM_PROMPT) -> dict
         "Authorization": f"Bearer {api_key}",
     }
 
+    effective_prompt = f"{system_prompt}\n\n{GITHUB_STRATEGY_OVERLAY}"
+
     body = {
         "model": settings.GITHUB_MODEL or "gpt-4o",
         "messages": [
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": effective_prompt},
             {"role": "user", "content": payload},
         ],
         "temperature": 0.3,

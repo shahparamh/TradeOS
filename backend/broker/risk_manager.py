@@ -34,7 +34,7 @@ class RiskManager:
             # Query and apply all rules dynamically
             enable_short = self.get_rule(db, "enable_short_selling", True)
             enable_lockout = self.get_rule(db, "enable_loss_lockout", False)
-            min_profit_pct = self.get_rule(db, "min_profit_threshold_pct", 0.005)
+            min_profit_pct = self.get_rule(db, "min_profit_threshold_pct", 0.015)
             enable_fno = self.get_rule(db, "enable_fno_trading", True)
             enable_equity = self.get_rule(db, "enable_equity_trading", False)
             
@@ -43,14 +43,14 @@ class RiskManager:
             self.max_intraday_trades = int(self.get_rule(db, "max_intraday_trades", 70.0))
             self.daily_drawdown_limit = self.get_rule(db, "daily_drawdown_limit", -0.05)
             
-            self.min_confidence = self.get_rule(db, "min_confidence", 45.0)
+            self.min_confidence = self.get_rule(db, "min_confidence", 65.0)
             self.max_stop_loss_distance = self.get_rule(db, "max_stop_loss_distance", 0.07)
-            self.min_risk_reward_ratio = self.get_rule(db, "min_risk_reward_ratio", 1.0)
+            self.min_risk_reward_ratio = self.get_rule(db, "min_risk_reward_ratio", 2.0)
             self.max_consecutive_losses = int(self.get_rule(db, "max_consecutive_losses", 5.0))
             self.max_trades_per_stock_daily = int(self.get_rule(db, "max_trades_per_stock_daily", 5.0))
             self.max_trades_daily_per_model = int(self.get_rule(db, "max_trades_daily_per_model", 3.0))
             self.entry_start_hour = self.get_rule(db, "entry_start_hour", 9.25)
-            self.entry_end_hour = self.get_rule(db, "entry_end_hour", 15.0)
+            self.entry_end_hour = self.get_rule(db, "entry_end_hour", 14.0)
         finally:
             db.close()
  
@@ -388,6 +388,13 @@ class RiskManager:
             profit_pct = (target - entry) / entry
         else:
             profit_pct = (entry - target) / entry
+
+        # Hard reject if target is not in profit direction.
+        if profit_pct <= 0:
+            return {
+                "passed": False,
+                "reason": "PROFIT_THRESHOLD_REJECTED: Target is not in a profitable direction relative to entry."
+            }
             
         if profit_pct < min_profit_pct:
             return {
