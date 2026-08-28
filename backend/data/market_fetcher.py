@@ -41,9 +41,6 @@ def fetch_live_price(symbol: str) -> dict:
         
         # Guard against None values
         if current_price is None or pd.isna(current_price) or current_price == 0:
-            if symbol in _live_price_cache:
-                # Return cached data on rate limit or empty response
-                return _live_price_cache[symbol][0]
             raise ValueError(f"Received empty or zero price from yfinance for {symbol}")
             
         change = round(current_price - prev_close, 2) if prev_close else 0
@@ -64,7 +61,7 @@ def fetch_live_price(symbol: str) -> dict:
         return res
     except Exception as e:
         logger.error(f"Error fetching live price for {symbol}: {str(e)}")
-        return {"symbol": symbol, "price": 0, "change": 0, "percent_change": 0}
+        return None
 
 def fetch_intraday_candles(symbol: str, interval: str = "5m", period: str = "5d") -> pd.DataFrame:
     try:

@@ -247,8 +247,12 @@ def get_today_pre_market_strategy():
     db = SessionLocal()
     try:
         today = date.today()
-        # Query strategies for today
-        strategies = db.query(AgentDailyStrategy).filter(AgentDailyStrategy.date == today).all()
+        from database.models import Agent
+        # Query strategies for today for active agents only
+        strategies = db.query(AgentDailyStrategy).join(Agent).filter(
+            AgentDailyStrategy.date == today,
+            Agent.is_active == True
+        ).all()
         
         result = []
         for s in strategies:
