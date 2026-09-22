@@ -4,7 +4,7 @@ Actively watches open positions for stop-loss, target, and intraday square-off.
 """
 
 from database.models import Position, Trade, Agent
-from data.market_fetcher import fetch_live_price
+from data.market_fetcher import fetch_bulk_prices_cached
 from utils.logger import setup_logger
 from utils.helpers import get_ist_now
 
@@ -19,13 +19,21 @@ class PositionMonitor:
         positions = db_session.query(Position).all()
         actions = []
 
+        if not positions:
+            return actions
+
+        # Batch-fetch current prices for every distinct symbol in ONE yfinance call,
+        # instead of one rate-limited round trip per open position.
+        unique_symbols = tuple(sorted({pos.symbol for pos in positions}))
+        prices = fetch_bulk_prices_cached(unique_symbols)
+
         for pos in positions:
             try:
-                # 1. Fetch live price of the underlying asset
-                price_data = fetch_live_price(pos.symbol)
+                # 1. Look up the batch-fetched live price of the underlying asset
+                price_data = prices.get(pos.symbol)
                 if not price_data:
                     continue
-                
+
                 current_price = price_data["price"]
                 
                 # 2. Evaluate exit conditions based on underlying price

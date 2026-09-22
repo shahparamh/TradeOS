@@ -15,6 +15,14 @@ class Agent(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    # --- Survival Arena fields ---
+    mode = Column(String(20), default="FLEET")            # "FLEET" | "SURVIVAL"
+    starting_capital = Column(Float, nullable=True)        # per-agent override for survival agents
+    death_threshold = Column(Float, nullable=True)
+    is_dead = Column(Boolean, default=False)
+    died_at = Column(DateTime, nullable=True)
+    trading_paused = Column(Boolean, default=False)        # per-agent emergency-stop flag
+
     trades = relationship("Trade", back_populates="agent")
     positions = relationship("Position", back_populates="agent")
     daily_performance = relationship("DailyPerformance", back_populates="agent")
@@ -171,6 +179,44 @@ class SystemRule(Base):
     numeric_value = Column(Float, nullable=True)
     description = Column(String(250))
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ArenaDebateLog(Base):
+    """Full multi-role debate transcript for one Survival Arena candidate evaluation."""
+    __tablename__ = "arena_debate_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    agent_id = Column(Integer, ForeignKey("agents.id"))
+    symbol = Column(String(30))
+    cycle_id = Column(String(50))
+    analyst_reports = Column(Text)          # JSON: {technical, fundamentals, sentiment}
+    bull_argument = Column(Text, nullable=True)
+    bear_argument = Column(Text, nullable=True)
+    debate_rounds = Column(Integer, default=1)
+    trader_proposal = Column(Text)          # JSON decision contract
+    risk_team_debate = Column(Text, nullable=True)   # JSON
+    portfolio_manager_decision = Column(Text)        # JSON decision contract
+    risk_engine_result = Column(Text)       # JSON: {approved, reason, quantity}
+    final_action = Column(String(20))       # BUY | SELL | HOLD | REJECTED
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    agent = relationship("Agent")
+
+
+class ArenaReflection(Base):
+    """Post-trade / daily reflection memory, injected into future Arena prompts."""
+    __tablename__ = "arena_reflections"
+
+    id = Column(Integer, primary_key=True, index=True)
+    agent_id = Column(Integer, ForeignKey("agents.id"))
+    trade_id = Column(Integer, ForeignKey("trades.id"), nullable=True)
+    realized_pnl = Column(Float, nullable=True)
+    realized_return_pct = Column(Float, nullable=True)
+    benchmark_return_pct = Column(Float, nullable=True)   # Nifty return over the same window
+    reflection_text = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    agent = relationship("Agent")
 
 
 class APIUsageLog(Base):

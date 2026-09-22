@@ -80,13 +80,12 @@ const AgentDetail = () => {
                                     padding: '4px 10px',
                                     fontSize: '11px',
                                     fontWeight: '700',
-                                    borderRadius: '6px',
+                                    borderRadius: 'var(--radius-sm)',
                                     cursor: 'pointer',
                                     border: '1px solid',
-                                    transition: 'all 0.2s',
-                                    background: agent.is_active ? 'rgba(239, 68, 68, 0.08)' : 'rgba(16, 185, 129, 0.08)',
-                                    color: agent.is_active ? '#ef4444' : '#10b981',
-                                    borderColor: agent.is_active ? 'rgba(239, 68, 68, 0.2)' : 'rgba(16, 185, 129, 0.2)',
+                                    background: agent.is_active ? 'var(--red-glow)' : 'var(--green-glow)',
+                                    color: agent.is_active ? 'var(--red-loss)' : 'var(--green-profit)',
+                                    borderColor: agent.is_active ? 'rgba(255,102,115,0.25)' : 'rgba(56,217,150,0.25)',
                                 }}
                             >
                                 {agent.is_active ? 'Pause Agent' : 'Resume Agent'}

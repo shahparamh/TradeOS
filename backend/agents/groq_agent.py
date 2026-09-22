@@ -1,7 +1,7 @@
 """
-TradeOS — Groq AI Agent (Llama 3.3 70B via Groq Cloud)
+TradeOS — Groq AI Agent (via Groq Cloud)
 Uses Groq's OpenAI-compatible API for ultra-fast free inference.
-Groq provides free access to open-source models like Llama 3.3 70B.
+Model is configured via settings.GROQ_MODEL (see config.py).
 """
 
 import time
@@ -60,7 +60,10 @@ async def query_groq(payload: str, system_prompt: str = SYSTEM_PROMPT) -> dict:
             {"role": "user", "content": payload},
         ],
         "temperature": 0.3,
-        "max_tokens": 1000,
+        # gpt-oss is a reasoning model — its internal reasoning tokens count against this
+        # budget before any JSON content is emitted. Too small a value (verified: even 10
+        # tokens) burns the whole budget on reasoning and returns EMPTY content.
+        "max_tokens": 2000,
     }
 
     try:
@@ -105,7 +108,7 @@ async def query_groq(payload: str, system_prompt: str = SYSTEM_PROMPT) -> dict:
         data = response.json()
         raw_text = data["choices"][0]["message"]["content"]
 
-        logger.info(f"Groq (Llama 3.3) responded in {latency_ms}ms")
+        logger.info(f"Groq ({settings.GROQ_MODEL}) responded in {latency_ms}ms")
 
         parsed = parse_ai_response(raw_text)
         parsed["agent"] = "Groq-Llama"

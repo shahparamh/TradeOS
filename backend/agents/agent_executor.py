@@ -167,16 +167,19 @@ async def execute_all_agents(
     broker = VirtualBroker(settings)
 
     try:
-        agents = db.query(Agent).filter(Agent.is_active == True).all()
+        # Fleet mode only — Survival Arena agents run through the separate arena_debate pipeline
+        agents = db.query(Agent).filter(Agent.is_active == True, Agent.mode != "SURVIVAL").all()
         if not agents: return []
 
-        # Dynamic Layer 2 Option Greeks & Net Inflows
+        # Dynamic Layer 2 Option Greeks & Net Inflows — runs in a thread since this (and the
+        # yfinance rate limiter it goes through) blocks synchronously on a cache miss, which
+        # would otherwise freeze the whole event loop for every other request/scheduled job.
         from data.market_fetcher import fetch_option_greeks_and_fii, calculate_market_regime
-        options_greeks = fetch_option_greeks_and_fii(opportunity.get("symbol"))
+        options_greeks = await asyncio.to_thread(fetch_option_greeks_and_fii, opportunity.get("symbol"))
         opportunity["options_greeks"] = options_greeks
-        
+
         # Dynamic Layer 1 Nifty Regime
-        market_regime = calculate_market_regime()
+        market_regime = await asyncio.to_thread(calculate_market_regime)
         market_context["market_regime"] = market_regime
 
         agent_states = {}

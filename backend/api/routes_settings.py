@@ -126,18 +126,22 @@ def reset_database(payload: ResetPayload, db: Session = Depends(get_db), current
         
     try:
         from database.models import Agent, Trade, Position, DailyPerformance, AIResponse, AgentDailyStrategy
-        
-        db.query(Position).delete()
-        db.query(Trade).delete()
-        db.query(DailyPerformance).delete()
-        db.query(AgentDailyStrategy).delete()
-        db.query(AIResponse).delete()
-        
-        agents = db.query(Agent).all()
+
+        # Fleet mode only — resetting the fleet's capital must never touch the Survival Arena's
+        # tiny paper balances or its separate trade/debate history.
+        fleet_agent_ids = [a.id for a in db.query(Agent.id).filter(Agent.mode != "SURVIVAL").all()]
+
+        db.query(Position).filter(Position.agent_id.in_(fleet_agent_ids)).delete(synchronize_session=False)
+        db.query(Trade).filter(Trade.agent_id.in_(fleet_agent_ids)).delete(synchronize_session=False)
+        db.query(DailyPerformance).filter(DailyPerformance.agent_id.in_(fleet_agent_ids)).delete(synchronize_session=False)
+        db.query(AgentDailyStrategy).filter(AgentDailyStrategy.agent_id.in_(fleet_agent_ids)).delete(synchronize_session=False)
+        db.query(AIResponse).filter(AIResponse.agent_id.in_(fleet_agent_ids)).delete(synchronize_session=False)
+
+        agents = db.query(Agent).filter(Agent.mode != "SURVIVAL").all()
         for agent in agents:
             agent.cash_balance = payload.starting_capital
             agent.total_pnl = 0.0
-            
+
         db.commit()
         return {"status": "success", "message": f"Platform reset successfully! Cash balances refreshed to ₹{payload.starting_capital:,.2f}."}
     except Exception as e:

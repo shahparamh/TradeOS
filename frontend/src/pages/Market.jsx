@@ -1,26 +1,33 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { TrendingUp, TrendingDown, BarChart2, RefreshCw, Activity, Cpu, Search } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { TrendingUp, TrendingDown, BarChart2, RefreshCw, Activity, Cpu, Search, Newspaper } from 'lucide-react';
 import api, { marketAPI } from '../services/api';
 import CandlestickChart from '../components/CandlestickChart';
+import { NIFTY50_SYMBOLS } from '../utils/symbols';
 
+const SENTIMENT_STYLE = {
+  positive: { bg: 'var(--green-glow)', color: 'var(--green-profit)' },
+  negative: { bg: 'var(--red-glow)', color: 'var(--red-loss)' },
+  neutral: { bg: 'var(--bg-tertiary)', color: 'var(--text-muted)' },
+};
 
-
-const NIFTY50_SYMBOLS = [
-  'RELIANCE','TCS','HDFCBANK','INFY','ICICIBANK',
-  'SBIN','HINDUNILVR','BHARTIARTL','ITC','KOTAKBANK',
-  'LT','AXISBANK','WIPRO','BAJFINANCE','MARUTI',
-  'NTPC','POWERGRID','SUNPHARMA','TITAN','TECHM',
-  'HCLTECH','ULTRACEMCO','ADANIENT','ADANIPORTS','COALINDIA',
-  'ONGC','BPCL','GRASIM','NESTLEIND','TATASTEEL',
-];
+const toChartCandles = (candles) => (candles || [])
+  .map(c => ({
+    time: Math.floor(new Date(c.datetime).getTime() / 1000),
+    open: c.open,
+    high: c.high,
+    low: c.low,
+    close: c.close,
+  }))
+  .sort((a, b) => a.time - b.time);
 
 const getHeatColor = (pct) => {
-  if (pct > 3)  return { bg: 'rgba(34,197,94,0.55)',  border: 'rgba(34,197,94,0.4)' };
-  if (pct > 1.5) return { bg: 'rgba(34,197,94,0.35)', border: 'rgba(34,197,94,0.25)' };
-  if (pct > 0)  return { bg: 'rgba(34,197,94,0.15)',  border: 'rgba(34,197,94,0.1)' };
-  if (pct > -1.5) return { bg: 'rgba(239,68,68,0.15)', border: 'rgba(239,68,68,0.1)' };
-  if (pct > -3)  return { bg: 'rgba(239,68,68,0.35)', border: 'rgba(239,68,68,0.25)' };
-  return { bg: 'rgba(239,68,68,0.55)', border: 'rgba(239,68,68,0.4)' };
+  if (pct > 3)  return { bg: 'rgba(56,217,150,0.45)',  border: 'rgba(56,217,150,0.4)' };
+  if (pct > 1.5) return { bg: 'rgba(56,217,150,0.28)', border: 'rgba(56,217,150,0.25)' };
+  if (pct > 0)  return { bg: 'rgba(56,217,150,0.12)',  border: 'rgba(56,217,150,0.1)' };
+  if (pct > -1.5) return { bg: 'rgba(255,102,115,0.12)', border: 'rgba(255,102,115,0.1)' };
+  if (pct > -3)  return { bg: 'rgba(255,102,115,0.28)', border: 'rgba(255,102,115,0.25)' };
+  return { bg: 'rgba(255,102,115,0.45)', border: 'rgba(255,102,115,0.4)' };
 };
 
 const Market = () => {
@@ -78,20 +85,22 @@ const Market = () => {
 
 
   // Ad-hoc Custom AI stock analyzer states
-  const [searchTicker, setSearchTicker] = useState('');
+  const [searchParams] = useSearchParams();
+  const [searchTicker, setSearchTicker] = useState(searchParams.get('symbol') || '');
   const [analysisResult, setAnalysisResult] = useState(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState(null);
 
-  const handleCustomAnalysis = async (e) => {
-    e.preventDefault();
-    if (!searchTicker.trim()) return;
+  const runAnalysis = useCallback(async (rawTicker) => {
+    if (!rawTicker || !rawTicker.trim()) return;
     setAnalysisLoading(true);
     setAnalysisError(null);
     setAnalysisResult(null);
     try {
-      const ticker = searchTicker.trim().toUpperCase();
-      const res = await api.get(`/scanner/analyze/${ticker}`);
+      const ticker = rawTicker.trim().toUpperCase();
+      // This call concurrently queries every active AI provider plus fetches news/fundamentals —
+      // routinely takes 40-60s, well past the default 30s client timeout.
+      const res = await api.get(`/scanner/analyze/${ticker}`, { timeout: 90000 });
       if (res.data.status === 'success') {
         setAnalysisResult(res.data);
       } else {
@@ -102,7 +111,24 @@ const Market = () => {
     } finally {
       setAnalysisLoading(false);
     }
+  }, []);
+
+  const handleCustomAnalysis = (e) => {
+    e.preventDefault();
+    runAnalysis(searchTicker);
   };
+
+  // Deep link from the global search (?symbol=RELIANCE) — auto-runs the same analysis.
+  // Re-runs on every change to the URL param, not just on mount, since navigating here
+  // from the search while already on this page doesn't remount the component.
+  const symbolParam = searchParams.get('symbol');
+  useEffect(() => {
+    if (symbolParam) {
+      setSearchTicker(symbolParam);
+      runAnalysis(symbolParam);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [symbolParam]);
 
 
   /* ---- Indices ---- */
@@ -117,24 +143,29 @@ const Market = () => {
   /* ---- Live stock prices for heatmap ---- */
   const fetchStocks = useCallback(async () => {
     setStocksLoading(true);
-    const results = await Promise.allSettled(
-      NIFTY50_SYMBOLS.map(sym => marketAPI.getPrice(`${sym}.NS`))
-    );
-    const data = results
-      .map((r, i) => {
-        if (r.status !== 'fulfilled') return null;
-        const d = r.value.data;
-        return {
-          symbol: NIFTY50_SYMBOLS[i],
-          price: d.price,
-          change: d.change,
-          percent_change: d.percent_change,
-        };
-      })
-      .filter(Boolean);
-    setStocks(data);
-    setStocksLoading(false);
-    setLastRefresh(new Date());
+    try {
+      const fullSymbols = NIFTY50_SYMBOLS.map(sym => `${sym}.NS`);
+      const res = await marketAPI.getPrices(fullSymbols);
+      const quotes = res.data;
+      const data = NIFTY50_SYMBOLS
+        .map(sym => {
+          const q = quotes[`${sym}.NS`];
+          if (!q) return null;
+          return {
+            symbol: sym,
+            price: q.price,
+            change: q.change,
+            percent_change: q.percent_change,
+          };
+        })
+        .filter(Boolean);
+      setStocks(data);
+    } catch (_) {
+      // keep last known stocks on failure
+    } finally {
+      setStocksLoading(false);
+      setLastRefresh(new Date());
+    }
   }, []);
 
   useEffect(() => {
@@ -187,62 +218,49 @@ const Market = () => {
       </div>
 
       {/* AI Live Inspector Panel */}
-      <div className="card" style={{ marginBottom: 24, border: '1px solid rgba(139, 92, 246, 0.25)', background: 'linear-gradient(135deg, rgba(17, 24, 39, 0.9) 0%, rgba(88, 28, 135, 0.05) 100%)', boxShadow: '0 8px 32px 0 rgba(0, 0, 0, 0.37)' }}>
-        <div className="section-header" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: 12 }}>
-          <h3 className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--accent-purple)' }}>
-            <Cpu size={18} className="animate-pulse" /> Live Multi-Agent AI Ticker Inspector
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="section-header" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: 10 }}>
+          <h3 className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--accent-blue)' }}>
+            <Cpu size={15} /> Live Multi-Agent AI Ticker Inspector
           </h3>
-          <span className="badge" style={{ background: 'var(--accent-purple)', color: '#fff', fontSize: 10 }}>AD-HOC FLEET QUERY</span>
+          <span className="badge">AD-HOC FLEET QUERY</span>
         </div>
-        
-        <div style={{ padding: '16px 20px' }}>
-          <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16 }}>
+
+        <div style={{ padding: '12px 4px 4px' }}>
+          <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 12 }}>
             Query live candles, calculate indicators, and concurrently invoke your active AI fleet for real-time trade signals. Type any stock symbol (e.g. <b>RELIANCE</b>, <b>TATASTEEL</b>, or <b>AAPL</b>).
           </p>
-          
-          <form onSubmit={handleCustomAnalysis} style={{ display: 'flex', gap: 12, marginBottom: 20 }}>
+
+          <form onSubmit={handleCustomAnalysis} style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
             <div style={{ position: 'relative', flex: 1 }}>
-              <Search size={16} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+              <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
               <input
                 type="text"
                 placeholder="Enter stock ticker (e.g. ADANIENT, INFY, TCS)..."
                 value={searchTicker}
                 onChange={(e) => setSearchTicker(e.target.value)}
+                className="mono"
                 style={{
                   width: '100%',
-                  padding: '12px 12px 12px 40px',
-                  borderRadius: 8,
+                  padding: '8px 10px 8px 30px',
+                  borderRadius: 'var(--radius-sm)',
                   border: '1px solid var(--border-color)',
-                  background: 'rgba(255, 255, 255, 0.03)',
-                  color: '#fff',
-                  fontSize: 14,
-                  transition: 'all 0.3s ease',
-                  fontFamily: 'var(--font-mono)'
+                  background: 'var(--bg-primary)',
+                  color: 'var(--text-primary)',
+                  fontSize: 13,
+                  outline: 'none',
                 }}
-                onFocus={(e) => e.target.style.borderColor = 'var(--accent-purple)'}
+                onFocus={(e) => e.target.style.borderColor = 'var(--accent-blue)'}
                 onBlur={(e) => e.target.style.borderColor = 'var(--border-color)'}
               />
             </div>
             <button
               type="submit"
               disabled={analysisLoading}
-              className="refresh-btn"
-              style={{
-                background: 'var(--accent-purple)',
-                color: '#fff',
-                border: 'none',
-                padding: '0 24px',
-                borderRadius: 8,
-                fontWeight: 600,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                transition: 'all 0.2s ease',
-                opacity: analysisLoading ? 0.7 : 1
-              }}
+              className="btn-primary"
+              style={{ padding: '0 18px', opacity: analysisLoading ? 0.7 : 1 }}
             >
-              {analysisLoading ? <RefreshCw size={15} className="spin" /> : <Activity size={15} />}
+              {analysisLoading ? <RefreshCw size={13} className="spin" /> : <Activity size={13} />}
               {analysisLoading ? 'Analyzing Ticker...' : 'Inspect Ticker'}
             </button>
           </form>
@@ -250,9 +268,9 @@ const Market = () => {
           {/* Loading State */}
           {analysisLoading && (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px 0', gap: 16 }}>
-              <RefreshCw size={36} className="spin" style={{ color: 'var(--accent-purple)' }} />
+              <RefreshCw size={28} className="spin" style={{ color: 'var(--accent-blue)' }} />
               <div style={{ textAlign: 'center' }}>
-                <h4 style={{ fontWeight: 600, color: '#fff', marginBottom: 4 }}>Invoking AI Fleet...</h4>
+                <h4 style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4, fontSize: 13 }}>Invoking AI Fleet...</h4>
                 <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
                   Fetching candles, computing VWAP, RSI, MACD indicators, and consulting agents in parallel.
                 </p>
@@ -262,7 +280,7 @@ const Market = () => {
 
           {/* Error State */}
           {analysisError && (
-            <div style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.25)', borderRadius: 8, padding: '12px 16px', color: 'var(--red-loss)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.25)', borderRadius: 4, padding: '12px 16px', color: 'var(--red-loss)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
               ⚠️ {analysisError}
             </div>
           )}
@@ -271,16 +289,16 @@ const Market = () => {
           {analysisResult && (
             <div className="animate-fade-in">
               {/* Technical Indicator Summary Bar */}
-              <div style={{ background: 'rgba(255, 255, 255, 0.02)', borderRadius: 8, border: '1px solid var(--border-color)', padding: '16px 20px', marginBottom: 20 }}>
+              <div style={{ background: 'rgba(255, 255, 255, 0.02)', borderRadius: 4, border: '1px solid var(--border-color)', padding: '16px 20px', marginBottom: 20 }}>
                 <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 12, borderBottom: '1px solid rgba(255, 255, 255, 0.06)', paddingBottom: 12, marginBottom: 12 }}>
                   <div>
-                    <h4 style={{ fontWeight: 700, fontSize: 18, color: '#fff', margin: 0 }}>
+                    <h4 style={{ fontWeight: 700, fontSize: 18, color: 'var(--text-primary)', margin: 0 }}>
                       {analysisResult.symbol}
                     </h4>
                     <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>LIVE ANALYSIS SNAPSHOT</span>
                   </div>
                   <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: 18, fontWeight: 800, color: '#fff', fontFamily: 'var(--font-mono)' }}>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
                       ₹{analysisResult.price?.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                     </div>
                     <span className="badge" style={{
@@ -297,7 +315,7 @@ const Market = () => {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 16 }}>
                   <div>
                     <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>RSI (14)</div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', fontFamily: 'var(--font-mono)' }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
                       {analysisResult.technical_summary?.rsi?.toFixed(1)} 
                       <span style={{ fontSize: 10, marginLeft: 4, color: analysisResult.technical_summary?.rsi < 35 ? 'var(--green-profit)' : analysisResult.technical_summary?.rsi > 65 ? 'var(--red-loss)' : 'var(--text-muted)' }}>
                         ({analysisResult.technical_summary?.rsi < 35 ? 'Oversold' : analysisResult.technical_summary?.rsi > 65 ? 'Overbought' : 'Neutral'})
@@ -306,23 +324,63 @@ const Market = () => {
                   </div>
                   <div>
                     <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>MACD Signal</div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
                       {analysisResult.technical_summary?.macd?.toUpperCase()}
                     </div>
                   </div>
                   <div>
                     <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>VWAP Position</div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
                       {analysisResult.technical_summary?.price_vs_vwap?.toUpperCase()}
                     </div>
                   </div>
                   <div>
                     <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Bollinger Bands</div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
                       {analysisResult.technical_summary?.bb_position?.toUpperCase()}
                     </div>
                   </div>
                 </div>
+              </div>
+
+              {/* Chart Analysis */}
+              {analysisResult.candles?.length > 0 && (
+                <div style={{ background: 'rgba(255, 255, 255, 0.02)', borderRadius: 4, border: '1px solid var(--border-color)', padding: '16px 20px', marginBottom: 20 }}>
+                  <h4 style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5, margin: '0 0 12px 0' }}>
+                    Chart Analysis — 5-Minute Candles (Last 5 Days)
+                  </h4>
+                  <CandlestickChart data={toChartCandles(analysisResult.candles)} height={280} />
+                </div>
+              )}
+
+              {/* News Analysis */}
+              <div style={{ background: 'rgba(255, 255, 255, 0.02)', borderRadius: 4, border: '1px solid var(--border-color)', padding: '16px 20px', marginBottom: 20 }}>
+                <h4 style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5, margin: '0 0 12px 0', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Newspaper size={13} /> News Analysis
+                </h4>
+                {(!analysisResult.news || analysisResult.news.length === 0) ? (
+                  <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>No recent news found for this symbol.</p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {analysisResult.news.map((n, i) => {
+                      const style = SENTIMENT_STYLE[n.sentiment] || SENTIMENT_STYLE.neutral;
+                      return (
+                        <a
+                          key={i}
+                          href={n.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, textDecoration: 'none', padding: '8px 10px', borderRadius: 6, background: 'rgba(255,255,255,0.015)' }}
+                        >
+                          <span style={{ fontSize: 12, color: 'var(--text-secondary)', flex: 1 }}>{n.headline}</span>
+                          <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: style.bg, color: style.color, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+                            {n.sentiment}
+                          </span>
+                        </a>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               {/* Agent Grid */}
@@ -336,7 +394,7 @@ const Market = () => {
                   if (dec.agent?.toLowerCase().includes('gemini')) brandColor = 'var(--color-gemini)';
                   else if (dec.agent?.toLowerCase().includes('groq')) brandColor = 'var(--color-groq)';
                   else if (dec.agent?.toLowerCase().includes('qwen')) brandColor = 'var(--accent-cyan)';
-                  else if (dec.agent?.toLowerCase().includes('deepseek')) brandColor = 'var(--accent-purple)';
+                  else if (dec.agent?.toLowerCase().includes('deepseek')) brandColor = 'var(--color-github)';
                   else if (dec.agent?.toLowerCase().includes('ollama') || dec.agent?.toLowerCase().includes('local')) brandColor = 'var(--green-profit)';
 
 
@@ -371,13 +429,13 @@ const Market = () => {
                           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, background: 'rgba(255,255,255,0.02)', padding: 8, borderRadius: 6, marginBottom: 12, border: '1px solid rgba(255,255,255,0.03)' }}>
                             <div>
                               <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>STOP LOSS</div>
-                              <div style={{ fontSize: 12, fontWeight: 700, color: '#fff', fontFamily: 'var(--font-mono)' }}>
+                              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
                                 ₹{dec.stop_loss ? dec.stop_loss.toLocaleString('en-IN') : '—'}
                               </div>
                             </div>
                             <div>
                               <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>TARGET</div>
-                              <div style={{ fontSize: 12, fontWeight: 700, color: '#fff', fontFamily: 'var(--font-mono)' }}>
+                              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
                                 ₹{dec.target ? dec.target.toLocaleString('en-IN') : '—'}
                               </div>
                             </div>
@@ -519,7 +577,7 @@ const Market = () => {
             maxWidth: 800,
             background: 'rgba(10, 15, 30, 0.95)',
             border: '1px solid rgba(255,255,255,0.08)',
-            borderRadius: 12,
+            borderRadius: 4,
             boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
             display: 'flex',
             flexDirection: 'column',
@@ -535,7 +593,7 @@ const Market = () => {
               gap: 12
             }}>
               <div>
-                <h3 style={{ margin: 0, fontWeight: 700, fontSize: 18, color: '#fff' }}>
+                <h3 style={{ margin: 0, fontWeight: 700, fontSize: 18, color: 'var(--text-primary)' }}>
                   {selectedStock.replace('.NS', '')} Candlestick Chart
                 </h3>
                 <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
@@ -621,22 +679,13 @@ const Market = () => {
               </span>
               <button
                 onClick={() => {
-                  setSearchTicker(selectedStock.replace('.NS', ''));
+                  const ticker = selectedStock.replace('.NS', '');
+                  setSearchTicker(ticker);
                   setSelectedStock(null);
-                  setTimeout(() => {
-                    document.querySelector('form').dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
-                  }, 100);
+                  runAnalysis(ticker);
                 }}
-                className="refresh-btn"
-                style={{
-                  background: 'var(--accent-purple)',
-                  color: '#fff',
-                  border: 'none',
-                  padding: '8px 16px',
-                  borderRadius: 6,
-                  fontWeight: 600,
-                  cursor: 'pointer'
-                }}
+                className="btn-primary"
+                style={{ padding: '6px 14px' }}
               >
                 Inspect Ticker
               </button>

@@ -63,6 +63,7 @@ def fetch_live_price(symbol: str) -> dict:
         logger.error(f"Error fetching live price for {symbol}: {str(e)}")
         return None
 
+@ttl_cache(seconds=60)
 def fetch_intraday_candles(symbol: str, interval: str = "5m", period: str = "5d") -> pd.DataFrame:
     try:
         ticker = yf.Ticker(symbol)
@@ -72,6 +73,37 @@ def fetch_intraday_candles(symbol: str, interval: str = "5m", period: str = "5d"
     except Exception as e:
         logger.error(f"Error fetching intraday candles for {symbol}: {str(e)}")
         return pd.DataFrame()
+
+@ttl_cache(seconds=180)
+def fetch_intraday_candles_batch(symbols: tuple, interval: str = "5m", period: str = "5d") -> dict:
+    """Fetches intraday OHLCV candles for an entire watchlist in ONE rate-limited yfinance call,
+    instead of one sequential ticker.history() call per symbol. Cuts an 11-symbol scan from
+    ~33s+ of rate-limited round trips down to roughly one. `symbols` must be a tuple (not a
+    list) so the result is cacheable/hashable by ttl_cache. Returns {symbol: DataFrame},
+    with an empty DataFrame for any symbol that failed or came back empty — matching the
+    single-symbol fetch_intraday_candles() contract so callers don't need to change shape."""
+    results = {s: pd.DataFrame() for s in symbols}
+    if not symbols:
+        return results
+
+    try:
+        data = rate_limited_call(
+            yf.download, list(symbols), period=period, interval=interval,
+            group_by="ticker", progress=False, threads=True,
+        )
+    except Exception as e:
+        logger.error(f"Error batch-fetching intraday candles for {symbols}: {str(e)}")
+        return results
+
+    for symbol in symbols:
+        try:
+            df = data if len(symbols) == 1 else data[symbol]
+            results[symbol] = df.dropna(how="all")
+        except Exception as e:
+            logger.warning(f"Failed to slice batch candle data for {symbol}: {e}")
+
+    return results
+
 
 def fetch_historical_data(symbol: str, period: str = "6mo", interval: str = "1d") -> pd.DataFrame:
     try:
@@ -173,6 +205,52 @@ def fetch_bulk_prices(symbols: list) -> dict:
 @ttl_cache(seconds=60)
 def fetch_bulk_prices_cached(symbols: list) -> dict:
     return fetch_bulk_prices(symbols)
+
+
+@ttl_cache(seconds=60)
+def fetch_bulk_quotes(symbols: tuple) -> dict:
+    """Batch-fetches price + day-over-day change for many symbols in ONE yfinance call —
+    for UI surfaces (heatmap, watchlist) that need change%, unlike fetch_bulk_prices which
+    only returns the latest close. `symbols` must be a tuple for cache hashability.
+    Uses 2 daily bars (today + previous close) instead of N individual fetch_live_price()
+    calls, each of which would otherwise queue behind the global 3s yfinance rate limit."""
+    results = {}
+    if not symbols:
+        return results
+
+    try:
+        data = rate_limited_call(
+            yf.download, list(symbols), period="2d", interval="1d",
+            group_by="ticker", progress=False, threads=True,
+        )
+    except Exception as e:
+        logger.error(f"Error batch-fetching quotes for {symbols}: {str(e)}")
+        return results
+
+    for symbol in symbols:
+        try:
+            df = data if len(symbols) == 1 else data[symbol]
+            df = df.dropna(how="all")
+            if df.empty:
+                continue
+
+            current_price = float(df["Close"].iloc[-1])
+            prev_close = float(df["Close"].iloc[-2]) if len(df) >= 2 else current_price
+            change = current_price - prev_close
+            percent_change = (change / prev_close * 100) if prev_close else 0
+
+            results[symbol] = {
+                "symbol": symbol,
+                "price": round(current_price, 2),
+                "prev_close": round(prev_close, 2),
+                "change": round(change, 2),
+                "percent_change": round(percent_change, 2),
+                "volume": int(df["Volume"].iloc[-1]) if not pd.isna(df["Volume"].iloc[-1]) else 0,
+            }
+        except Exception as e:
+            logger.warning(f"Failed to compute batch quote for {symbol}: {e}")
+
+    return results
 
 @ttl_cache(seconds=86400)
 def fetch_option_oi_metrics(symbol: str) -> dict:

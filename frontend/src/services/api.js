@@ -39,10 +39,12 @@ export const settingsAPI = {
 export const marketAPI = {
     getIndices: () => api.get('/market/indices'),
     getPrice: (symbol) => api.get(`/market/price/${symbol}`),
+    getPrices: (symbols) => api.get(`/market/prices?symbols=${symbols.join(',')}`),
     getCandles: (symbol) => api.get(`/market/candles/${symbol}`),
     getNews: (symbol) => api.get(`/market/news/${symbol}`),
     getMacroNews: () => api.get('/market/news/macro'),
     getHeatmap: () => api.get('/market/heatmap'),
+    getWatchlist: () => api.get('/market/watchlist'),
 };
 
 export const agentAPI = {
@@ -60,7 +62,6 @@ export const brokerAPI = {
     closePosition: (id) => api.post(`/broker/positions/${id}/close`),
     getAgentStatus: (id) => api.get(`/broker/agents/${id}/status`),
     getDaily: () => api.get('/broker/performance/daily'),
-    placeManualTrade: (data) => api.post('/broker/trade/manual', data),
 };
 
 export const performanceAPI = {
@@ -70,6 +71,17 @@ export const performanceAPI = {
 export const strategyAPI = {
     getTodayPreMarket: () => api.get('/scheduler/pre-market/today'),
     triggerPreMarket: () => api.post('/scheduler/pre-market'),
+};
+
+export const arenaAPI = {
+    getAgents: () => api.get('/arena/agents'),
+    getAgentDetail: (id) => api.get(`/arena/agents/${id}`),
+    createAgent: (data) => api.post('/arena/agents', data),
+    getStatus: () => api.get('/arena/status'),
+    getMarket: () => api.get('/arena/market'),
+    emergencyStop: () => api.post('/arena/emergency-stop'),
+    resume: () => api.post('/arena/resume'),
+    triggerCycle: () => api.post('/arena/cycle-trigger'),
 };
 
 export default api;

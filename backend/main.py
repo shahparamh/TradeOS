@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from database.connection import engine, SessionLocal
+from fastapi.middleware.gzip import GZipMiddleware
+from database.connection import engine, SessionLocal, run_lightweight_migrations
 from database.models import Base, Agent
 import asyncio
 from contextlib import asynccontextmanager
@@ -14,6 +15,7 @@ from api.routes_broker import router as broker_router
 from api.routes_auth import router as auth_router
 from api.routes_settings import router as settings_router
 from api.routes_health import router as health_router
+from api.routes_arena import router as arena_router
 from scheduler.trading_loop import TradingScheduler
 from utils.api_manager import initialize_api_manager
 
@@ -22,6 +24,7 @@ trading_scheduler = TradingScheduler()
 
 # Create all tables on startup
 Base.metadata.create_all(bind=engine)
+run_lightweight_migrations()
 
 def seed_db():
     db = SessionLocal()
@@ -52,6 +55,20 @@ def seed_db():
         if agent.name not in existing_names:
             db.add(agent)
 
+    # 1b. Seed the default Survival Arena agent
+    if "AgentZero-Alpha" not in existing_names:
+        arena_starting_capital = 2000.0
+        db.add(Agent(
+            name="AgentZero-Alpha",
+            model_name=settings.GEMINI_MODEL,
+            provider="google",
+            cash_balance=arena_starting_capital,
+            starting_capital=arena_starting_capital,
+            death_threshold=arena_starting_capital * 0.10,
+            total_pnl=0.0,
+            mode="SURVIVAL",
+        ))
+
     # 2. Seed default admin user
     from database.models import User
     from api.routes_auth import hash_password
@@ -70,6 +87,7 @@ def seed_db():
     # 3. Seed default trading rules
     from database.models import SystemRule
     rules_to_seed = [
+        ("arena_emergency_stop", "boolean", False, None, "Global kill switch for the Survival Arena — halts all new arena orders without needing AI approval"),
         ("enable_loss_lockout", "boolean", False, None, "Toggle single-stock daily loss lockout"),
         ("enable_short_selling", "boolean", True, None, "Allow intraday short positions"),
         ("min_profit_threshold_pct", "float", None, 0.015, "Minimum take profit percentage threshold (e.g., 0.015 for 1.5%)"),
@@ -146,6 +164,10 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Compress JSON responses (trade history, candles, watchlists) before they hit the wire —
+# shrinks payloads ~70-80% for minimal CPU cost, which matters most on slower client connections.
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
 # CORS for React frontend
 app.add_middleware(
     CORSMiddleware,
@@ -210,15 +232,17 @@ def reset_platform_data(payload: dict = None):
             if rule and rule.numeric_value is not None:
                 capital = float(rule.numeric_value)
         
-        # 1. Truncate / delete all transactional tables
-        db.query(Position).delete()
-        db.query(Trade).delete()
-        db.query(AIResponse).delete()
-        db.query(DailyPerformance).delete()
-        db.query(AgentDailyStrategy).delete()
-        
-        # 2. Reset agent balances
-        agents = db.query(Agent).all()
+        # 1. Truncate / delete all transactional tables (Fleet mode only — Survival Arena
+        # keeps its own balances and history; a fleet reset must never touch it)
+        fleet_agent_ids = [a.id for a in db.query(Agent.id).filter(Agent.mode != "SURVIVAL").all()]
+        db.query(Position).filter(Position.agent_id.in_(fleet_agent_ids)).delete(synchronize_session=False)
+        db.query(Trade).filter(Trade.agent_id.in_(fleet_agent_ids)).delete(synchronize_session=False)
+        db.query(AIResponse).filter(AIResponse.agent_id.in_(fleet_agent_ids)).delete(synchronize_session=False)
+        db.query(DailyPerformance).filter(DailyPerformance.agent_id.in_(fleet_agent_ids)).delete(synchronize_session=False)
+        db.query(AgentDailyStrategy).filter(AgentDailyStrategy.agent_id.in_(fleet_agent_ids)).delete(synchronize_session=False)
+
+        # 2. Reset agent balances (Fleet mode only)
+        agents = db.query(Agent).filter(Agent.mode != "SURVIVAL").all()
         for agent in agents:
             agent.cash_balance = capital
             agent.total_pnl = 0.0
@@ -283,6 +307,7 @@ app.include_router(agents_router, prefix="/api")
 app.include_router(broker_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
 app.include_router(settings_router, prefix="/api")
+app.include_router(arena_router, prefix="/api")
 
 if __name__ == "__main__":
     import uvicorn

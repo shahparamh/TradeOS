@@ -1,53 +1,64 @@
-/* TradeOS — Global Design System */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+/* TradeOS — Premium Trading Dashboard Design System */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
 :root {
     /* Background layers */
-    --bg-primary: #0a0e17;          /* Deepest background */
-    --bg-secondary: #111827;        /* Card backgrounds */
-    --bg-tertiary: #1a2332;         /* Elevated surfaces */
-    --bg-hover: #1f2b3d;            /* Hover states */
+    --bg-primary: #080F17;          /* Application background */
+    --bg-sidebar: #0C1622;          /* Sidebar / topbar background */
+    --bg-secondary: #111E2C;        /* Panel background */
+    --bg-tertiary: #172738;         /* Elevated surfaces, menus, hover base */
+    --bg-hover: #1D3247;            /* Hover background */
 
     /* Text */
-    --text-primary: #e2e8f0;
-    --text-secondary: #94a3b8;
-    --text-muted: #64748b;
+    --text-primary: #EDF3FA;
+    --text-secondary: #9AADC2;
+    --text-muted: #6C7F94;
 
-    /* Trading colors */
-    --green-profit: #22c55e;        /* Profit / Buy / Bullish */
-    --green-glow: rgba(34, 197, 94, 0.15);
-    --red-loss: #ef4444;            /* Loss / Sell / Bearish */
-    --red-glow: rgba(239, 68, 68, 0.15);
+    /* Financial semantics */
+    --green-profit: #31D394;
+    --green-glow: rgba(49, 211, 148, 0.12);
+    --red-loss: #F16B7C;
+    --red-glow: rgba(241, 107, 124, 0.12);
 
-    /* Agent brand colors */
-    --color-chatgpt: #10a37f;       /* OpenAI green */
-    --color-gemini: #4285f4;        /* Google blue */
-    --color-claude: #d97706;        /* Anthropic amber */
-    --color-grok: #a855f7;          /* xAI purple */
-    --color-groq: #a855f7;          /* Groq purple (same as grok) */
-    --color-github: #6f42c1;        /* GitHub premium purple */
+    /* Agent identifiers */
+    --color-chatgpt: #31D394;
+    --color-gemini: #2684FF;
+    --color-claude: #EAAE49;
+    --color-grok: #A98BD1;
+    --color-groq: #A98BD1;
+    --color-github: #43C8F5;
 
     /* Accent */
-    --accent-blue: #3b82f6;
-    --accent-cyan: #06b6d4;
+    --accent-blue: #2684FF;         /* Primary accent — nav, selection, primary actions */
+    --accent-cyan: #43C8F5;         /* Secondary highlight */
+    --accent-amber: #EAAE49;        /* Chart indicator / comparison accent */
+    --selected-row: #14273C;        /* Selected-row background */
 
     /* Borders */
-    --border-color: #1e293b;
-    --border-glow: rgba(59, 130, 246, 0.3);
+    --border-color: #26374A;
+    --border-glow: rgba(38, 132, 255, 0.35);
 
     /* Fonts */
     --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
     --font-sans: 'Inter', -apple-system, sans-serif;
 
     /* Radius */
-    --radius-sm: 6px;
-    --radius-md: 10px;
-    --radius-lg: 16px;
+    --radius-sm: 4px;    /* small chips/badges */
+    --radius-md: 6px;    /* controls: buttons, inputs */
+    --radius-lg: 10px;   /* panels/cards */
 
-    /* Shadows */
-    --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.4);
-    --shadow-glow-green: 0 0 20px rgba(34, 197, 94, 0.2);
-    --shadow-glow-red: 0 0 20px rgba(239, 68, 68, 0.2);
+    /* Spacing scale */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-6: 24px;
+
+    /* Shadows — subtle surface depth, not heavy glow */
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.25), 0 2px 8px rgba(0, 0, 0, 0.15);
+    --shadow-menu: 0 8px 24px rgba(0, 0, 0, 0.45);
+    --shadow-glow-green: none;
+    --shadow-glow-red: none;
 }
 
 * {
@@ -62,44 +73,57 @@ body {
     color: var(--text-primary);
     min-height: 100vh;
     overflow-x: hidden;
+    font-size: 13px;
+}
+
+/* Tabular numerals wherever monospace numbers appear */
+.mono, .mono * {
+    font-variant-numeric: tabular-nums;
 }
 
 /* Scrollbar Styling */
 ::-webkit-scrollbar {
     width: 8px;
+    height: 8px;
 }
 ::-webkit-scrollbar-track {
     background: var(--bg-primary);
 }
 ::-webkit-scrollbar-thumb {
-    background: var(--bg-tertiary);
-    border-radius: 10px;
+    background: var(--border-color);
+    border-radius: var(--radius-sm);
 }
 ::-webkit-scrollbar-thumb:hover {
     background: var(--bg-hover);
 }
 
-/* Global Transitions */
+/* Global Transitions — short, no bounce */
 a, button {
-    transition: all 0.2s ease;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
     cursor: pointer;
 }
 
-/* Glassmorphism Classes */
-.card {
-    background: linear-gradient(135deg, rgba(17, 24, 39, 0.8), rgba(26, 35, 50, 0.6));
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-lg);
-    padding: 24px;
-    backdrop-filter: blur(12px);
-    box-shadow: var(--shadow-card);
-    transition: all 0.3s ease;
+/* Focus visibility (keyboard navigation) */
+a:focus-visible, button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 1px;
 }
 
-.card:hover {
-    border-color: var(--border-glow);
-    transform: translateY(-2px);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+    }
+}
+
+/* Panel — subtle depth, rounded corners, thin border */
+.card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: var(--space-4);
+    box-shadow: var(--shadow-card);
 }
 
 /* Utility Classes */

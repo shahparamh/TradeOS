@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Zap, User, Lock, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import './Login.css';
 
@@ -32,30 +33,25 @@ const Login = () => {
 
     return (
         <div className="login-page-wrapper">
-            <div className="animated-background-glow"></div>
             <div className="login-card-container">
                 <div className="login-brand-header">
-                    <span className="brand-logo-icon">🌌</span>
+                    <Zap size={22} className="brand-logo-icon" fill="currentColor" />
                     <h1>Trade<span>OS</span></h1>
                     <p className="brand-subtitle">Autonomous Multi-Agent AI Trading Terminal</p>
-                </div>
-
-                <div className="login-tabs" style={{ display: 'none' }}>
-                    <button className="tab-btn active">Sign In</button>
                 </div>
 
                 <form className="login-form" onSubmit={handleSubmit}>
                     <div className="form-group">
                         <label htmlFor="username">Username</label>
                         <div className="input-wrapper">
-                            <span className="input-icon">👤</span>
-                            <input 
-                                type="text" 
-                                id="username" 
-                                placeholder="Enter username" 
+                            <User size={14} className="input-icon" />
+                            <input
+                                type="text"
+                                id="username"
+                                placeholder="Enter username"
                                 value={username}
                                 onChange={(e) => setUsername(e.target.value)}
-                                required 
+                                required
                             />
                         </div>
                     </div>
@@ -63,21 +59,21 @@ const Login = () => {
                     <div className="form-group">
                         <label htmlFor="password">Password</label>
                         <div className="input-wrapper">
-                            <span className="input-icon">🔒</span>
-                            <input 
-                                type="password" 
-                                id="password" 
-                                placeholder="••••••••" 
+                            <Lock size={14} className="input-icon" />
+                            <input
+                                type="password"
+                                id="password"
+                                placeholder="••••••••"
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
-                                required 
+                                required
                             />
                         </div>
                     </div>
 
-                    <button 
-                        type="submit" 
-                        className="submit-action-btn" 
+                    <button
+                        type="submit"
+                        className="submit-action-btn"
                         disabled={isLoading}
                     >
                         {isLoading ? (
@@ -88,9 +84,9 @@ const Login = () => {
                     </button>
                 </form>
 
-                <div className="login-card-footer" style={{ borderTop: 'none', paddingTop: '0' }}>
-                    <p style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-                        🔒 Secure TradeOS Algo Terminal
+                <div className="login-card-footer">
+                    <p>
+                        <ShieldCheck size={12} /> Secure TradeOS Algo Terminal
                     </p>
                 </div>
             </div>

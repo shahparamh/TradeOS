@@ -70,52 +70,81 @@ async def analyze_stock_manually(symbol: str):
         symbol = f"{symbol}.NS"
         
     try:
-        import pandas as pd
+        import asyncio
         from data.market_fetcher import fetch_intraday_candles, fetch_live_price
         from scanner.technical_engine import calculate_all_indicators, generate_indicator_summary
         from data.data_aggregator import aggregate_market_context
+        from data.news_fetcher import fetch_all_news_for_stock
+        from data.fundamentals_fetcher import fetch_yf_fundamentals
         from agents.agent_executor import execute_all_agents
-        
-        # 1. Fetch intraday candles
-        candles_df = fetch_intraday_candles(symbol, "5m", "1d")
+
+        # 1. Fetch intraday candles (5d window so the chart has enough history to be useful,
+        # not just today's session). Must run in a thread — this (and the yfinance rate
+        # limiter it goes through) blocks synchronously, which would otherwise freeze the
+        # single-threaded event loop and stall every other request the backend is serving.
+        candles_df = await asyncio.to_thread(fetch_intraday_candles, symbol, "5m", "5d")
         if candles_df.empty:
             return {"status": "error", "message": f"Could not fetch candle data for {symbol}."}
-            
+
         # 2. Fetch live price
-        price_res = fetch_live_price(symbol)
+        price_res = await asyncio.to_thread(fetch_live_price, symbol)
         current_price = price_res.get("price", candles_df["Close"].iloc[-1])
-        
+
         # 3. Calculate technical indicators
         enriched_df = calculate_all_indicators(candles_df)
         indicators = generate_indicator_summary(enriched_df, symbol)
         indicators["price"] = current_price
-        
-        # 4. Fetch Market Context (Index performance etc.)
-        market_context = await aggregate_market_context()
-        
-        # 5. Build manual check payload
+
+        # 4. Fetch Market Context (Index performance etc.), real news, and fundamentals concurrently.
+        # fundamentals is REQUIRED — execute_all_agents() silently returns [] with no fundamentals
+        # in the opportunity payload, which was quietly breaking every AI decision from this endpoint.
+        market_context, news, fundamentals = await asyncio.gather(
+            aggregate_market_context(),
+            asyncio.to_thread(fetch_all_news_for_stock, symbol),
+            asyncio.to_thread(fetch_yf_fundamentals, symbol),
+        )
+        news = news or []
+
+        # 5. Build manual check payload — news and fundamentals are now part of both the AI payload and the response
         opportunity = {
             "symbol": symbol,
             "signal_type": "MANUAL_CHECK",
-            "indicators": indicators
+            "indicators": indicators,
+            "fundamentals": fundamentals,
         }
-        
+
         # 6. Execute all active agents concurrently (execute_trades=False is critical!)
         ai_decisions = await execute_all_agents(
             market_context=market_context,
             opportunity=opportunity,
-            news=[],
+            news=news,
             execute_trades=False
         )
-        
+
+        # 7. Format candles for the frontend chart (same shape as GET /market/candles/{symbol})
+        candles = []
+        df_reset = candles_df.reset_index()
+        date_col = "Datetime" if "Datetime" in df_reset.columns else "Date"
+        for _, row in df_reset.iterrows():
+            candles.append({
+                "datetime": str(row[date_col]),
+                "open": round(row["Open"], 2),
+                "high": round(row["High"], 2),
+                "low": round(row["Low"], 2),
+                "close": round(row["Close"], 2),
+                "volume": int(row["Volume"]),
+            })
+
         return {
             "status": "success",
             "symbol": symbol,
             "price": current_price,
             "technical_summary": indicators,
-            "ai_decisions": ai_decisions
+            "ai_decisions": ai_decisions,
+            "news": news,
+            "candles": candles,
         }
-        
+
     except Exception as e:
         return {"status": "error", "message": f"Analysis failed: {str(e)}"}
 

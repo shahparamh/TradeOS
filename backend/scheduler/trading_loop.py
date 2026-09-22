@@ -4,11 +4,11 @@ from database.connection import SessionLocal
 from database.models import Agent, DailyPerformance, Trade, Position, AIResponse
 from agents.agent_executor import execute_all_agents
 from data.data_aggregator import aggregate_market_context
-from data.market_fetcher import fetch_intraday_candles
+from data.market_fetcher import fetch_intraday_candles_batch
 from scanner.technical_engine import calculate_all_indicators, generate_indicator_summary
 from broker.position_monitor import PositionMonitor
 from utils.logger import setup_logger
-from utils.constants import WATCHLIST
+from utils.constants import WATCHLIST, ARENA_WATCHLIST
 from datetime import datetime, date
 import asyncio
 
@@ -86,6 +86,15 @@ class TradingScheduler:
             CronTrigger(day_of_week="mon-fri", hour="9-15", minute="*/10", timezone="Asia/Kolkata"),
             id="trading_loop",
             name="Main Trading Cycle",
+            replace_existing=True
+        )
+
+        # 2b. Survival Arena Cycle - Every 10 mins (9:15 AM - 3:15 PM IST)
+        self.scheduler.add_job(
+            self.run_arena_cycle,
+            CronTrigger(day_of_week="mon-fri", hour="9-15", minute="*/10", timezone="Asia/Kolkata"),
+            id="arena_loop",
+            name="Survival Arena Cycle",
             replace_existing=True
         )
 
@@ -170,6 +179,27 @@ class TradingScheduler:
             if exits:
                 for ex in exits:
                     logger.info(f"Monitor Exit: {ex['agent']} | {ex['symbol']} | {ex.get('reason', 'UNKNOWN')} | PnL: {ex.get('pnl', 0.0)}")
+
+            # Survival Arena bookkeeping: reflection memory for closed arena trades, then death check.
+            from database.models import Agent as AgentModel, Trade as TradeModel
+            from agents.arena_debate import record_reflection
+            for ex in exits:
+                agent_row = db.query(AgentModel).filter(AgentModel.name == ex.get("agent")).first()
+                if agent_row and agent_row.mode == "SURVIVAL":
+                    trades = db.query(TradeModel).filter(
+                        TradeModel.agent_id == agent_row.id,
+                        TradeModel.symbol == ex.get("symbol"),
+                        TradeModel.status.isnot(None),
+                    ).order_by(TradeModel.exit_time.desc()).first()
+                    if trades:
+                        record_reflection(db, agent_row, trades)
+            if exits:
+                db.commit()
+
+            from broker import survival_guard
+            death_events = survival_guard.check_deaths(db, broker)
+            for ev in death_events:
+                logger.warning(f"ARENA DEATH: {ev['agent']} (id={ev['agent_id']}) died with final equity ₹{ev['final_equity']:.2f}")
         except Exception as e:
             logger.error(f"Monitor cycle error: {e}")
         finally:
@@ -222,17 +252,17 @@ class TradingScheduler:
             # 1. Market Context
             market_context = await aggregate_market_context()
             
-            # 2. Get active agents
-            agents = db.query(Agent).filter(Agent.is_active == True).all()
-            
+            # 2. Get active agents (Fleet mode only — Survival Arena agents run through run_arena_cycle)
+            agents = db.query(Agent).filter(Agent.is_active == True, Agent.mode != "SURVIVAL").all()
+
             # 3. Watchlist symbols (Loaded dynamically from constants)
             symbols = WATCHLIST
-            
+
             # Fetch rules for category switches and cooldowns
             from database.models import SystemRule
             enable_equity = db.query(SystemRule).filter(SystemRule.key == "enable_equity_trading").first()
             enable_equity_bool = enable_equity.bool_value if enable_equity else True
-            
+
             enable_fno = db.query(SystemRule).filter(SystemRule.key == "enable_fno_trading").first()
             enable_fno_bool = False # Temporarily disabled FNO trading
 
@@ -241,7 +271,11 @@ class TradingScheduler:
 
             fno_cooldown = db.query(SystemRule).filter(SystemRule.key == "fno_ai_cooldown_min").first()
             fno_cooldown_min = float(fno_cooldown.numeric_value) if fno_cooldown else 30.0
-            
+
+            # Batch-fetch intraday candles for the whole watchlist in one yfinance call
+            # instead of one rate-limited round trip per symbol (see fetch_intraday_candles_batch).
+            batch_candles = await asyncio.to_thread(fetch_intraday_candles_batch, tuple(symbols), "5m", "5d")
+
             # Scan symbols sequentially to prevent rate limits and overloading the APIs
             for symbol in symbols:
                 # 1. Category check
@@ -270,12 +304,12 @@ class TradingScheduler:
                         continue
                         
                     logger.info(f"Scanning {symbol}...")
-                    candles_df = await asyncio.to_thread(fetch_intraday_candles, symbol, "5m", "5d")
-                    if candles_df.empty:
+                    candles_df = batch_candles.get(symbol)
+                    if candles_df is None or candles_df.empty:
                         continue
-                    
+
                     indicators = generate_indicator_summary(calculate_all_indicators(candles_df), symbol)
-                    
+
                     # PRE-FILTER 1: Extreme Indecision + Ultra-low Volume Filter
                     # Only skip if RSI is highly indecisive (45-55) AND volume is extremely low (<1.0x average)
                     rsi = indicators.get("rsi", 50.0)
@@ -363,6 +397,126 @@ class TradingScheduler:
             self.is_running_cycle = False
             logger.info("=== TRADING CYCLE END ===")
 
+    async def run_arena_cycle(self, ignore_hours: bool = False):
+        """Survival Arena pipeline: scans ARENA_WATCHLIST and runs the multi-role debate
+        pipeline for every non-dead SURVIVAL agent. Mirrors run_trading_cycle's structure
+        but is intentionally simpler — cash equity only, no F&O/derivatives context."""
+        from datetime import datetime, timezone, timedelta
+        from database.models import Agent, SystemRule
+
+        ist = timezone(timedelta(hours=5, minutes=30))
+        now = datetime.now(ist)
+
+        if not ignore_hours:
+            from utils.market_calendar import is_market_holiday
+            if is_market_holiday(now.date()):
+                return
+            market_start = now.replace(hour=9, minute=15, second=0, microsecond=0)
+            market_end = now.replace(hour=15, minute=15, second=0, microsecond=0)
+            if now < market_start or now > market_end:
+                return
+
+        db = SessionLocal()
+        try:
+            stop_rule = db.query(SystemRule).filter(SystemRule.key == "arena_emergency_stop").first()
+            if stop_rule and stop_rule.bool_value:
+                logger.info("Survival Arena is paused (emergency stop active). Skipping cycle.")
+                return
+
+            agents = db.query(Agent).filter(
+                Agent.mode == "SURVIVAL",
+                Agent.is_active == True,
+                Agent.is_dead == False,
+            ).all()
+            if not agents:
+                return
+
+            market_context = await aggregate_market_context()
+
+            from broker.virtual_broker import VirtualBroker
+            from broker.survival_risk_manager import SurvivalRiskManager
+            from agents.arena_debate import run_arena_debate
+            from database.models import Position, Trade
+            from config import settings
+            broker = VirtualBroker(settings)
+
+            # Batch-fetch intraday candles for the whole arena watchlist in one yfinance call.
+            batch_candles = await asyncio.to_thread(fetch_intraday_candles_batch, tuple(ARENA_WATCHLIST), "5m", "5d")
+
+            for symbol in ARENA_WATCHLIST:
+                local_db = SessionLocal()
+                try:
+                    candles_df = batch_candles.get(symbol)
+                    if candles_df is None or candles_df.empty:
+                        continue
+                    indicators = generate_indicator_summary(calculate_all_indicators(candles_df), symbol)
+
+                    from data.fundamentals_fetcher import fetch_yf_fundamentals
+                    fundamentals = await asyncio.to_thread(fetch_yf_fundamentals, symbol)
+
+                    from data.news_fetcher import fetch_all_news_for_stock
+                    news_payload = await asyncio.to_thread(fetch_all_news_for_stock, symbol) or []
+
+                    is_valid, validation_error = _validate_data_integrity(symbol, indicators, fundamentals)
+                    if not is_valid:
+                        logger.warning(f"[Arena] Skipping {symbol} - {validation_error}")
+                        continue
+
+                    opportunity = {
+                        "symbol": symbol,
+                        "indicators": indicators,
+                        "fundamentals": fundamentals,
+                        "news": news_payload,
+                        "ignore_hours": ignore_hours,
+                    }
+
+                    for agent in agents:
+                        agent_row = local_db.query(Agent).get(agent.id)
+                        if not agent_row or agent_row.is_dead:
+                            continue
+
+                        positions = local_db.query(Position).filter(Position.agent_id == agent_row.id).all()
+                        if any(p.symbol == symbol for p in positions):
+                            continue
+                        if len(positions) >= SurvivalRiskManager.MAX_OPEN_POSITIONS:
+                            continue
+
+                        agent_state = {
+                            "cash_balance": agent_row.cash_balance,
+                            "starting_capital": agent_row.starting_capital,
+                            "open_positions_value": sum(p.unrealized_pnl or 0.0 for p in positions),
+                            "positions_count": len(positions),
+                            "open_symbols": [p.symbol for p in positions],
+                            "is_dead": agent_row.is_dead,
+                        }
+
+                        decision = await run_arena_debate(agent_row, opportunity, agent_state, local_db)
+
+                        if decision.get("decision") == "BUY":
+                            current_price = indicators.get("price")
+                            result = broker.buy(
+                                agent_row, symbol, decision["quantity"], current_price,
+                                decision["stop_loss"], decision["target"], decision.get("confidence", 0),
+                                "INTRADAY", local_db, "LONG",
+                            )
+                            if result.get("success"):
+                                local_db.commit()
+                                logger.info(f"[Arena] {agent_row.name} bought {decision['quantity']} {symbol} @ {result['fill_price']}")
+                            else:
+                                logger.warning(f"[Arena] Buy failed for {agent_row.name} on {symbol}: {result.get('error')}")
+
+                        await asyncio.sleep(5)
+
+                except Exception as inner_ex:
+                    logger.error(f"[Arena] Failed to process {symbol}: {inner_ex}")
+                finally:
+                    local_db.close()
+
+        except Exception as e:
+            logger.error(f"Arena cycle error: {e}")
+        finally:
+            db.close()
+
     async def run_end_of_day(self):
         """Calculates daily performance for all agents."""
         db = SessionLocal()
@@ -417,8 +571,8 @@ class TradingScheduler:
             # 1. Market Context
             market_context = await aggregate_market_context()
             
-            # 2. Active Agents
-            agents = db.query(Agent).filter(Agent.is_active == True).all()
+            # 2. Active Agents (Fleet mode only)
+            agents = db.query(Agent).filter(Agent.is_active == True, Agent.mode != "SURVIVAL").all()
             if not agents:
                 logger.info("No active agents found for pre-market planning.")
                 return

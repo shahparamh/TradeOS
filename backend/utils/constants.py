@@ -15,6 +15,10 @@ WATCHLIST = [
 ]
 
 
+# Survival Arena watchlist — liquid NSE equities only (no index/F&O, options/leverage disabled for Arena agents)
+ARENA_WATCHLIST = [s for s in WATCHLIST if not s.startswith("^")]
+
+
 # Indian market indices
 NIFTY_50 = "^NSEI"
 SENSEX = "^BSESN"

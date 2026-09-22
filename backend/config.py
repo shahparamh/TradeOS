@@ -44,7 +44,7 @@ class Settings:
     GROK_MODEL: str = "grok-4.20-reasoning"  # Updated based on user input
     GROQ_API_KEYS: list = [k.strip() for k in os.getenv("GROQ_API_KEYS", "").split(",") if k.strip()] or [os.getenv("GROQ_API_KEY", "")]
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
-    GROQ_MODEL: str = "llama-3.3-70b-versatile"  # Free tier on Groq
+    GROQ_MODEL: str = "openai/gpt-oss-120b"  # llama-3.3-70b-versatile was retired from Groq's catalog
     OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3.2")
     GITHUB_API_KEYS: list = [k.strip() for k in os.getenv("GITHUB_API_KEYS", "").split(",") if k.strip()] or [os.getenv("GITHUB_API_KEY", "")]
     GITHUB_API_KEY: str = os.getenv("GITHUB_API_KEY", "")

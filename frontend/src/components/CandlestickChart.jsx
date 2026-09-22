@@ -28,34 +28,35 @@ const CandlestickChart = ({
             width: chartContainerRef.current.clientWidth,
             height: height,
             layout: {
-                background: { color: '#0a0e17' },
-                textColor: '#94a3b8',
+                background: { color: '#101318' },
+                textColor: '#A8B2C0',
+                fontFamily: "'JetBrains Mono', monospace",
             },
             grid: {
-                vertLines: { color: 'rgba(30, 41, 59, 0.2)' },
-                horzLines: { color: 'rgba(30, 41, 59, 0.2)' },
+                vertLines: { color: 'rgba(48, 57, 70, 0.35)' },
+                horzLines: { color: 'rgba(48, 57, 70, 0.35)' },
             },
             crosshair: {
                 mode: CrosshairMode.Normal,
-                vertLine: { color: 'rgba(59, 130, 246, 0.4)', labelVisible: true },
-                horzLine: { color: 'rgba(59, 130, 246, 0.4)', labelVisible: true },
+                vertLine: { color: 'rgba(255, 152, 0, 0.4)', labelVisible: true },
+                horzLine: { color: 'rgba(255, 152, 0, 0.4)', labelVisible: true },
             },
             rightPriceScale: {
-                borderColor: '#1e293b',
+                borderColor: '#303946',
             },
             timeScale: {
-                borderColor: '#1e293b',
+                borderColor: '#303946',
                 timeVisible: true,
             },
         });
 
         const candlestickSeries = chart.addSeries(CandlestickSeries, {
-            upColor: '#22c55e',
-            downColor: '#ef4444',
-            borderDownColor: '#ef4444',
-            borderUpColor: '#22c55e',
-            wickDownColor: '#ef4444',
-            wickUpColor: '#22c55e',
+            upColor: '#38D996',
+            downColor: '#FF6673',
+            borderDownColor: '#FF6673',
+            borderUpColor: '#38D996',
+            wickDownColor: '#FF6673',
+            wickUpColor: '#38D996',
         });
 
         candlestickSeries.setData(data);
@@ -65,7 +66,7 @@ const CandlestickChart = ({
         if (entryPrice) {
             candlestickSeries.createPriceLine({
                 price: Number(entryPrice),
-                color: '#3b82f6', // Blue for Entry
+                color: '#68B7FF', // Blue for Entry
                 lineWidth: 2,
                 lineStyle: 2, // Dashed
                 axisLabelVisible: true,
@@ -76,7 +77,7 @@ const CandlestickChart = ({
         if (targetPrice) {
             candlestickSeries.createPriceLine({
                 price: Number(targetPrice),
-                color: '#22c55e', // Green for Target
+                color: '#38D996', // Green for Target
                 lineWidth: 2,
                 lineStyle: 2, // Dashed
                 axisLabelVisible: true,
@@ -87,7 +88,7 @@ const CandlestickChart = ({
         if (stopLoss) {
             candlestickSeries.createPriceLine({
                 price: Number(stopLoss),
-                color: '#ef4444', // Red for Stop Loss
+                color: '#FF6673', // Red for Stop Loss
                 lineWidth: 2,
                 lineStyle: 2, // Dashed
                 axisLabelVisible: true,

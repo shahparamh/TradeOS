@@ -9,7 +9,8 @@ router = APIRouter(prefix="/agents", tags=["AI Agents"])
 
 @router.get("/")
 def get_all_agents(db: Session = Depends(get_db)):
-    agents = db.query(Agent).options(joinedload(Agent.trades)).all()
+    # Fleet mode only — Survival Arena agents have their own /api/arena/agents endpoint
+    agents = db.query(Agent).options(joinedload(Agent.trades)).filter(Agent.mode != "SURVIVAL").all()
     result = []
     for agent in agents:
         all_trades = agent.trades or []
@@ -31,7 +32,7 @@ def get_all_agents(db: Session = Depends(get_db)):
 
 @router.get("/{agent_id}")
 def get_agent_detail(agent_id: int, db: Session = Depends(get_db)):
-    agent = db.query(Agent).get(agent_id)
+    agent = db.query(Agent).filter(Agent.id == agent_id, Agent.mode != "SURVIVAL").first()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
 

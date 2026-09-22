@@ -53,24 +53,13 @@ const PreMarket = () => {
                     <p className="subtitle">Daily stock selections, trading ranges, and logical reasoning calculated at 9:00 AM IST</p>
                 </div>
                 <div className="header-actions">
-                    <button 
-                        className="btn-primary trigger-pm-btn" 
+                    <button
+                        className="btn-primary trigger-pm-btn"
                         onClick={handleTriggerPreMarket}
                         disabled={loadingStrategy}
-                        style={{ 
-                            padding: '10px 18px', 
-                            fontSize: '13px', 
-                            gap: '8px', 
-                            background: 'rgba(99, 102, 241, 0.2)', 
-                            border: '1px solid rgba(99, 102, 241, 0.4)', 
-                            borderRadius: '8px', 
-                            cursor: 'pointer', 
-                            color: '#fff',
-                            display: 'flex',
-                            alignItems: 'center'
-                        }}
+                        style={{ padding: '10px 18px', fontSize: '13px', opacity: loadingStrategy ? 0.7 : 1 }}
                     >
-                        ⚡ Run Planner Now
+                        <Zap size={14} /> Run Planner Now
                     </button>
                 </div>
             </header>
@@ -117,7 +106,7 @@ const PreMarket = () => {
                                     </div>
                                     {isExpanded && (
                                         <div className="pm-item-details animate-slide-down" style={{ padding: '18px 20px', background: 'rgba(15, 23, 42, 0.4)' }}>
-                                            <h4 style={{ color: '#a855f7', marginBottom: '10px' }}>AI Execution Logic:</h4>
+                                            <h4 style={{ color: 'var(--accent-blue)', marginBottom: '10px' }}>AI Execution Logic:</h4>
                                             <p className="pm-reasoning" style={{ fontSize: '13px', lineHeight: '1.7' }}>{s.reasoning}</p>
                                         </div>
                                     )}
