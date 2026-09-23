@@ -3,6 +3,7 @@ TradeOS — Position Monitor
 Actively watches open positions for stop-loss, target, and intraday square-off.
 """
 
+import asyncio
 from database.models import Position, Trade, Agent
 from data.market_fetcher import fetch_bulk_prices_cached
 from market_data.factory import get_provider
@@ -38,7 +39,10 @@ class PositionMonitor:
         us_symbols = tuple(sorted({p.symbol for p in by_market.get("US", [])}))
         if us_symbols:
             try:
-                us_quotes = get_provider("US").get_bulk_quotes(us_symbols)
+                # Alpaca's HTTP call is synchronous (`requests`) — must run off the event
+                # loop thread, or it blocks every other coroutine on this single-worker
+                # server (including unrelated requests) for the duration of the call.
+                us_quotes = await asyncio.to_thread(get_provider("US").get_bulk_quotes, us_symbols)
                 for sym, q in us_quotes.items():
                     if q.get("price") is not None:
                         prices[sym] = {"price": q["price"], "volume": q.get("volume", 0)}

@@ -192,7 +192,12 @@ class TradingScheduler:
 
             us_open = False
             try:
-                us_open = get_provider("US").get_market_status().get("is_open", False)
+                # Alpaca's clock check is a synchronous `requests` call — must run off the
+                # event loop thread. Without to_thread, this blocks EVERY coroutine on the
+                # single-worker server (including unrelated health checks) for up to the
+                # request timeout, every 2 minutes.
+                us_status = await asyncio.to_thread(get_provider("US").get_market_status)
+                us_open = us_status.get("is_open", False)
             except MarketDataError:
                 pass
 
@@ -454,7 +459,7 @@ class TradingScheduler:
                 # US regular session only (9:30 AM - 4:00 PM ET, Mon-Fri). No pre-market/
                 # after-hours candles get fed into this strategy.
                 try:
-                    status_ = get_provider("US").get_market_status()
+                    status_ = await asyncio.to_thread(get_provider("US").get_market_status)
                     if not status_.get("is_open"):
                         return
                 except MarketDataError:
