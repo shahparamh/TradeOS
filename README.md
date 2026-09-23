@@ -104,6 +104,40 @@ DATABASE_URL=sqlite:///./tradeos.db
 
 ---
 
+## ☁️ Deployment (single Render Web Service)
+
+The backend serves the built frontend directly (`backend/main.py` mounts `frontend/dist` and
+falls back to `index.html` for client-side routes), so frontend + backend deploy as **one**
+Render Web Service — no separate static site, no CORS, no `VITE_API_URL` to keep in sync
+(the frontend calls the relative `/api` path, which resolves correctly since everything is
+same-origin in production).
+
+1. **Push to the repo Render is watching.** Confirm which remote/branch the Render service
+   is actually wired to before relying on a deploy — a push to the wrong fork won't ship.
+2. **Create a Postgres database** (e.g. [Neon](https://neon.tech)) and copy its connection
+   string — SQLite is dev-only, the connection pooling in `database/connection.py` targets
+   Postgres.
+3. **Create the Web Service on Render**, pointing at the repo root:
+   - **Build Command:**
+     ```bash
+     cd frontend && npm install && npm run build && cd ../backend && pip install -r requirements.txt
+     ```
+   - **Start Command:**
+     ```bash
+     cd backend && python main.py
+     ```
+     (reads the `PORT` env var Render injects automatically)
+4. **Set environment variables** on the service (Render → Environment):
+   - `DATABASE_URL` — your Postgres connection string
+   - `GEMINI_API_KEYS`, `GROQ_API_KEYS`, `GITHUB_API_KEY`, `DEEPSEEK_API_KEY`, `NEWS_API_KEYS` (comma-separated for multi-key rotation)
+   - `BACKEND_URL` — the service's own public Render URL, so the keep-alive self-ping job actually runs
+   - Any `INITIAL_CAPITAL` / risk-limit overrides you want (all have defaults otherwise)
+   - `RENDER` is set automatically by Render — this is what makes the scheduler skip local-Ollama agents in the cloud; don't create an `ollama`-provider Survival agent on this deployment.
+5. **Health check path:** `/api/health` (used to be `/`, moved so `/` can serve the app instead).
+6. Local dev is unaffected — `npm run dev` in `frontend/` proxies `/api` to `localhost:8000` (see `vite.config.js`), so you still run backend and frontend as two processes on your machine even though production is one service.
+
+---
+
 ## 📅 Platform Status & Roadmap
 
 | Phase | Title | Focus Area | Status |

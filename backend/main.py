@@ -177,11 +177,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Root endpoint for platform health checks (Render, etc.)
-@app.get("/")
-def read_root():
-    return {"status": "TradeOS Backend is running"}
-
 # Scheduler Controls
 @app.get("/api/scheduler/status")
 def get_scheduler_status():
@@ -371,3 +366,37 @@ async def websocket_market_endpoint(websocket: WebSocket):
             await asyncio.sleep(0.5)
     except WebSocketDisconnect:
         ws_manager.disconnect(websocket)
+
+
+# --- SINGLE-SERVICE FRONTEND HOSTING ---
+# Serves the built React app (frontend/dist) from this same FastAPI process, so one Render
+# Web Service covers both frontend and backend — no separate static site, no cross-origin
+# API calls, no VITE_API_URL to keep in sync (frontend/src/services/api.js defaults to the
+# relative "/api", which resolves correctly here since everything is same-origin).
+# Registered LAST so it never shadows the /api/* routers or the websocket route above.
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from fastapi import HTTPException
+from pathlib import Path
+
+_FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+
+if _FRONTEND_DIST.is_dir():
+    app.mount("/assets", StaticFiles(directory=_FRONTEND_DIST / "assets"), name="frontend-assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_frontend(full_path: str):
+        """SPA fallback: serves any built static file directly (favicon, manifest, ...),
+        otherwise returns index.html so React Router can handle the client-side route.
+        Unmatched /api/* paths 404 here instead of silently returning the app shell."""
+        if full_path.startswith("api/") or full_path == "api":
+            raise HTTPException(status_code=404, detail="Not Found")
+        candidate = _FRONTEND_DIST / full_path
+        if full_path and candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(_FRONTEND_DIST / "index.html")
+else:
+    # No build present (e.g. local backend-only dev) — keep a plain root health response.
+    @app.get("/")
+    def read_root():
+        return {"status": "TradeOS Backend is running", "note": "frontend/dist not found — run `npm run build` in frontend/ to serve the app from here."}

@@ -1,6 +1,10 @@
 import axios from 'axios';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+// Relative by default: works unmodified both in local dev (Vite proxies /api to the
+// backend, see vite.config.js) and in production (FastAPI serves the built frontend and
+// the API from the same origin — see the static-file mount at the bottom of backend/main.py).
+// VITE_API_URL stays available as an override for a split-service deployment.
+const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
 const api = axios.create({
     baseURL: API_BASE,
