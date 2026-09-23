@@ -15,11 +15,19 @@ logger = setup_logger("api_manager")
 class _ProviderState:
     """Tracks the state of all keys for a single API provider."""
 
+    # Most 429s from Gemini/Groq free tiers are transient PER-MINUTE rate limits (easy to
+    # trip: a single debate round fires 3 parallel analyst calls + 2 parallel risk-review
+    # calls), not real daily quota exhaustion. Marking a key exhausted for a full day on
+    # one of these was taking out the whole key pool within a few cycles — this cooldown
+    # lets a key come back once the per-minute window has plausibly reset, while the
+    # separate daily `requests` counter (see _reset_if_needed) still guards true daily caps.
+    EXHAUSTION_COOLDOWN_SECONDS = 90
+
     def __init__(self, keys: list[str]):
         self.keys = [k.strip() for k in keys if k and k.strip()]
-        # {key_hash: {"requests": int, "last_reset": float, "exhausted": bool}}
+        # {key_hash: {"requests": int, "last_reset": float, "exhausted": bool, "exhausted_at": float|None}}
         self.usage: dict[str, dict] = {
-            self._hash(k): {"requests": 0, "last_reset": time.time(), "exhausted": False}
+            self._hash(k): {"requests": 0, "last_reset": time.time(), "exhausted": False, "exhausted_at": None}
             for k in self.keys
         }
         self._current_idx = 0
@@ -29,13 +37,23 @@ class _ProviderState:
         return hashlib.sha256(key.encode()).hexdigest()[:16]
 
     def _reset_if_needed(self, key_hash: str, window_seconds: int = 86400):
-        """Reset daily counts if the window has passed."""
+        """Reset daily request counts if the window has passed."""
         state = self.usage[key_hash]
         if time.time() - state["last_reset"] >= window_seconds:
             state["requests"] = 0
             state["last_reset"] = time.time()
             state["exhausted"] = False
+            state["exhausted_at"] = None
             logger.info(f"[APIManager] Key {key_hash} daily usage reset.")
+
+    def _cooldown_if_elapsed(self, key_hash: str):
+        """Clears a short-lived exhaustion mark once the per-minute-limit cooldown passes."""
+        state = self.usage[key_hash]
+        if state["exhausted"] and state["exhausted_at"] is not None:
+            if time.time() - state["exhausted_at"] >= self.EXHAUSTION_COOLDOWN_SECONDS:
+                state["exhausted"] = False
+                state["exhausted_at"] = None
+                logger.info(f"[APIManager] Key {key_hash} exhaustion cooldown elapsed — back in rotation.")
 
     def get_key(self, daily_limit: int = 1500) -> Optional[str]:
         """
@@ -51,6 +69,7 @@ class _ProviderState:
             key = self.keys[idx]
             key_hash = self._hash(key)
             self._reset_if_needed(key_hash)
+            self._cooldown_if_elapsed(key_hash)
 
             state = self.usage[key_hash]
             if not state["exhausted"] and state["requests"] < daily_limit:
@@ -67,10 +86,12 @@ class _ProviderState:
             self.usage[key_hash]["requests"] += count
 
     def mark_exhausted(self, key: str):
-        """Permanently mark a key as exhausted (e.g. 429 with no retry-after)."""
+        """Marks a key exhausted for EXHAUSTION_COOLDOWN_SECONDS (see class docstring) —
+        a short, self-healing cooldown rather than a full-day lockout."""
         key_hash = self._hash(key)
         if key_hash in self.usage:
             self.usage[key_hash]["exhausted"] = True
+            self.usage[key_hash]["exhausted_at"] = time.time()
             # Rotate to next key
             self._current_idx = (self._current_idx + 1) % max(len(self.keys), 1)
             logger.warning(f"[APIManager] Key {key_hash} marked exhausted — rotating to next key.")
@@ -80,6 +101,7 @@ class _ProviderState:
         for key in self.keys:
             key_hash = self._hash(key)
             self._reset_if_needed(key_hash)
+            self._cooldown_if_elapsed(key_hash)
             state = self.usage[key_hash]
             if not state["exhausted"]:
                 return False
@@ -91,6 +113,7 @@ class _ProviderState:
         for key in self.keys:
             key_hash = self._hash(key)
             self._reset_if_needed(key_hash)
+            self._cooldown_if_elapsed(key_hash)
             state = self.usage[key_hash]
             stats.append({
                 "key_hash": key_hash,
