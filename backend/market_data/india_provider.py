@@ -6,6 +6,7 @@ writing a new provider class; nothing upstream of this file needs to change.
 """
 
 from datetime import datetime
+import math
 import pandas as pd
 
 from market_data.base import MarketDataProvider
@@ -20,6 +21,14 @@ from data.market_fetcher import (
 )
 
 
+def _clean_nan(d: dict) -> dict:
+    """yfinance sometimes returns NaN for price/change fields (e.g. an incomplete daily
+    bar right after close) — NaN is not valid JSON and Starlette's JSONResponse raises
+    ValueError on it (allow_nan=False), turning a data-quality glitch into a hard 500.
+    Replace NaN with None (JSON null) so it surfaces as "missing" instead of crashing."""
+    return {k: (None if isinstance(v, float) and math.isnan(v) else v) for k, v in d.items()}
+
+
 class IndiaMarketDataProvider(MarketDataProvider):
     market = "IN"
 
@@ -27,7 +36,7 @@ class IndiaMarketDataProvider(MarketDataProvider):
         raw = fetch_live_price(symbol)
         if not raw:
             return None
-        return {
+        return _clean_nan({
             "symbol": symbol,
             "market": "IN",
             "price": raw.get("price"),
@@ -38,12 +47,12 @@ class IndiaMarketDataProvider(MarketDataProvider):
             "percent_change": raw.get("percent_change"),
             "timestamp": get_ist_now().isoformat(),
             "currency": "INR",
-        }
+        })
 
     def get_bulk_quotes(self, symbols: tuple) -> dict:
         raw = fetch_bulk_quotes(tuple(symbols))
         return {
-            sym: {**q, "market": "IN", "currency": "INR"}
+            sym: _clean_nan({**q, "market": "IN", "currency": "INR"})
             for sym, q in raw.items()
         }
 
