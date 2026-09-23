@@ -89,10 +89,14 @@ class TradingScheduler:
             replace_existing=True
         )
 
-        # 2b. Survival Arena Cycle - Every 10 mins (9:15 AM - 3:15 PM IST)
+        # 2b. Survival Arena Cycle - Every 10 mins, offset 5 min from the Fleet cycle above
+        # (9:05/9:15/9:25/... vs 9:00/9:10/9:20/...) so the two cycles never fire in the same
+        # minute. Both hit the same global yfinance rate limiter and LLM providers; firing
+        # together was causing each cycle to queue behind the other's calls, turning a
+        # ~7-8 min cycle into 30-40+ min gaps under real concurrent load.
         self.scheduler.add_job(
             self.run_arena_cycle,
-            CronTrigger(day_of_week="mon-fri", hour="9-15", minute="*/10", timezone="Asia/Kolkata"),
+            CronTrigger(day_of_week="mon-fri", hour="9-15", minute="5-59/10", timezone="Asia/Kolkata"),
             id="arena_loop",
             name="Survival Arena Cycle",
             replace_existing=True
