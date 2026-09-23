@@ -199,6 +199,11 @@ class ArenaDebateLog(Base):
     risk_engine_result = Column(Text)       # JSON: {approved, reason, quantity}
     final_action = Column(String(20))       # BUY | SELL | HOLD | REJECTED
     created_at = Column(DateTime, default=datetime.utcnow)
+    # Raw numeric indicators (volume_ratio, rsi, macd, ema20/50, vwap, atr, ...) as fed into
+    # the analyst prompt — the analyst reports above only keep the LLM's PROSE about these
+    # numbers, not the numbers themselves, which makes bucketing outcomes by e.g. actual
+    # volume_ratio impossible after the fact. This captures the ground truth alongside it.
+    indicators_snapshot = Column(Text, nullable=True)  # JSON: raw indicators dict
 
     agent = relationship("Agent")
 

@@ -137,6 +137,7 @@ async def run_arena_debate(agent, opportunity: dict, agent_state: dict, db) -> d
         bear_argument=json.dumps(bear_argument, default=str),
         debate_rounds=1,
         trader_proposal=json.dumps(trader_proposal, default=str),
+        indicators_snapshot=json.dumps(indicators, default=str),
     )
 
     if trader_proposal.get("decision") != "BUY":

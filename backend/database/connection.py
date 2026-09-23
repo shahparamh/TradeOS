@@ -45,6 +45,9 @@ _NEW_COLUMNS = {
         ("died_at", "TIMESTAMP"),
         ("trading_paused", "BOOLEAN DEFAULT FALSE"),
     ],
+    "arena_debate_logs": [
+        ("indicators_snapshot", "TEXT"),
+    ],
 }
 
 

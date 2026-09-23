@@ -308,20 +308,79 @@ def arena_diagnostics_outcomes(
     if current_user.role not in ["admin", "trader"]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to view Arena diagnostics.")
 
-    from datetime import timezone as _tz, timedelta as _td
-    import pandas as pd
-    from data.market_fetcher import fetch_intraday_candles
+    logs = _fetch_debate_logs(db, agent_id, symbol, limit)
+    results = _compute_outcome_rows(logs)
 
+    # Quick aggregate: of the debates where we could measure a 60-min outcome, how often
+    # would staying out (HOLD) have been correct (price fell or stayed flat) vs a missed
+    # opportunity (price kept running)?
+    measured = [r for r in results if r["forward_returns_pct"].get("+60m") is not None]
+    missed_opportunity = sum(1 for r in measured if r["trader_decision"] != "BUY" and r["forward_returns_pct"]["+60m"] > 0.5)
+    avoided_drawdown = sum(1 for r in measured if r["trader_decision"] != "BUY" and r["forward_returns_pct"]["+60m"] < -0.5)
+
+    return {
+        "total_analyzed": len(results),
+        "outcomes_measured": len(measured),
+        "of_holds_missed_opportunity_gt_0.5pct": missed_opportunity,
+        "of_holds_avoided_drawdown_gt_0.5pct": avoided_drawdown,
+        "debates": results,
+    }
+
+
+def _fetch_debate_logs(db: Session, agent_id: Optional[int], symbol: Optional[str], limit: int):
     query = db.query(ArenaDebateLog).order_by(ArenaDebateLog.created_at.desc())
     if agent_id is not None:
         query = query.filter(ArenaDebateLog.agent_id == agent_id)
     if symbol is not None:
         query = query.filter(ArenaDebateLog.symbol == symbol)
-    logs = query.limit(limit).all()
+    return query.limit(limit).all()
+
+
+def _volume_ratio_bucket(vr) -> Optional[str]:
+    if vr is None:
+        return None
+    if vr < 0.7:
+        return "low (<0.7x)"
+    if vr < 1.3:
+        return "normal (0.7-1.3x)"
+    return "high (>=1.3x)"
+
+
+def _rr_bucket(rr) -> Optional[str]:
+    if rr is None:
+        return None
+    if rr < 1.0:
+        return "<1.0"
+    if rr < 1.5:
+        return "1.0-1.5"
+    if rr < 2.0:
+        return "1.5-2.0"
+    return ">=2.0"
+
+
+def _text_bias(text: str, positive_kw: tuple, negative_kw: tuple, unavailable_kw: tuple = ()) -> str:
+    text_l = (text or "").lower()
+    if any(k in text_l for k in unavailable_kw):
+        return "unavailable"
+    pos_hit = any(k in text_l for k in positive_kw)
+    neg_hit = any(k in text_l for k in negative_kw)
+    if pos_hit and not neg_hit:
+        return "bullish"
+    if neg_hit and not pos_hit:
+        return "bearish"
+    if pos_hit and neg_hit:
+        return "mixed"
+    return "neutral"
+
+
+def _compute_outcome_rows(logs: list) -> list:
+    """Shared by /diagnostics/outcomes and /diagnostics/summary — one debate log in,
+    one enriched row out (reasoning classification + real forward-price outcome)."""
+    from datetime import timezone as _tz, timedelta as _td
+    from data.market_fetcher import fetch_intraday_candles
 
     IST = _tz(_td(hours=5, minutes=30))
 
-    # Group by symbol so each symbol's candles are fetched once, not once per debate.
     by_symbol: dict[str, list] = {}
     for log in logs:
         by_symbol.setdefault(log.symbol, []).append(log)
@@ -336,13 +395,12 @@ def arena_diagnostics_outcomes(
         for log in sym_logs:
             trader = _safe_json(log.trader_proposal)
             pm = _safe_json(log.portfolio_manager_decision)
-            risk_engine = _safe_json(log.risk_engine_result)
             reports = _safe_json(log.analyst_reports)
+            indicators = _safe_json(log.indicators_snapshot) if getattr(log, "indicators_snapshot", None) else {}
             tech = reports.get("technical", {}) if isinstance(reports, dict) else {}
             fund = reports.get("fundamentals", {}) if isinstance(reports, dict) else {}
             sent = reports.get("sentiment", {}) if isinstance(reports, dict) else {}
 
-            # Reasoning to classify: the PM's if it overrode a BUY proposal, else the trader's.
             reasoning_source = pm.get("reasoning") if (trader.get("decision") == "BUY" and pm) else trader.get("reasoning")
             reason_split = _classify_reasons(reasoning_source)
 
@@ -354,10 +412,19 @@ def arena_diagnostics_outcomes(
                 stop_distance = abs(entry - sl)
                 rr = round(abs(target - entry) / stop_distance, 2) if stop_distance > 0 else None
 
+            volume_ratio = indicators.get("volume_ratio") if isinstance(indicators, dict) else None
+            technical_bias = _text_bias(tech.get("summary"), ("bullish", "constructive", "strong"), ("bearish", "weak", "breakdown"))
+            fundamentals_bias = _text_bias(
+                fund.get("summary"),
+                ("strong", "solid", "robust", "pristine", "attractive"),
+                ("precarious", "risk", "extreme", "compromised", "stretched", "leverage"),
+                ("unavailable",),
+            )
+            combo_key = f"{reason_split['primary_reason']} | tech={technical_bias} | fund={fundamentals_bias}"
+
             outcome = {"decision_price": None, "forward_returns_pct": {}, "mfe_pct": None, "mae_pct": None, "note": None}
             if candles is not None and not candles.empty and log.created_at:
                 decision_time_ist = log.created_at.replace(tzinfo=_tz.utc).astimezone(IST)
-                # Nearest candle at/before the decision timestamp = the price the debate was actually reasoning about.
                 prior = candles[candles.index <= decision_time_ist]
                 if not prior.empty:
                     decision_price = float(prior.iloc[-1]["Close"])
@@ -376,11 +443,9 @@ def arena_diagnostics_outcomes(
                             outcome["forward_returns_pct"][f"+{horizon}m"] = None
 
                     if not window.empty and decision_price:
-                        mfe = (float(window["High"].max()) - decision_price) / decision_price * 100
-                        mae = (float(window["Low"].min()) - decision_price) / decision_price * 100
-                        outcome["mfe_pct"] = round(mfe, 2)
-                        outcome["mae_pct"] = round(mae, 2)
-                    if window.empty:
+                        outcome["mfe_pct"] = round((float(window["High"].max()) - decision_price) / decision_price * 100, 2)
+                        outcome["mae_pct"] = round((float(window["Low"].min()) - decision_price) / decision_price * 100, 2)
+                    else:
                         outcome["note"] = "Not enough time has passed since this decision to measure a 60-min outcome yet."
                 else:
                     outcome["note"] = "No candle found at or before the decision timestamp (outside available history)."
@@ -389,12 +454,18 @@ def arena_diagnostics_outcomes(
 
             results.append({
                 "symbol": sym,
+                "agent_id": log.agent_id,
                 "created_at": log.created_at.isoformat() if log.created_at else None,
                 "trader_decision": trader.get("decision"),
                 "final_action": log.final_action,
                 "primary_reason": reason_split["primary_reason"],
                 "secondary_reasons": reason_split["secondary_reasons"],
                 "numeric_mentions": _extract_numeric_mentions(reasoning_source),
+                "volume_ratio": volume_ratio,
+                "volume_ratio_bucket": _volume_ratio_bucket(volume_ratio),
+                "technical_bias": technical_bias,
+                "fundamentals_bias": fundamentals_bias,
+                "combo_key": combo_key,
                 "technical_summary": tech.get("summary"),
                 "fundamentals_summary": fund.get("summary"),
                 "sentiment_summary": sent.get("summary"),
@@ -402,22 +473,66 @@ def arena_diagnostics_outcomes(
                 "proposed_stop_loss": sl,
                 "proposed_target": target,
                 "risk_reward_ratio": rr,
+                "risk_reward_bucket": _rr_bucket(rr),
                 **outcome,
             })
 
-    # Quick aggregate: of the debates where we could measure a 60-min outcome, how often
-    # would staying out (HOLD) have been correct (price fell or stayed flat) vs a missed
-    # opportunity (price kept running)?
-    measured = [r for r in results if r["forward_returns_pct"].get("+60m") is not None]
-    missed_opportunity = sum(1 for r in measured if r["trader_decision"] != "BUY" and r["forward_returns_pct"]["+60m"] > 0.5)
-    avoided_drawdown = sum(1 for r in measured if r["trader_decision"] != "BUY" and r["forward_returns_pct"]["+60m"] < -0.5)
+    return results
+
+
+def _rollup(rows: list, key_fn) -> list:
+    """Groups outcome rows by key_fn and computes the standard set of rollup stats:
+    sample size, missed-opportunity rate, avoided-drawdown rate, avg MFE/MAE."""
+    groups: dict = {}
+    for r in rows:
+        key = key_fn(r)
+        if key is None:
+            continue
+        groups.setdefault(key, []).append(r)
+
+    out = []
+    for key, group_rows in groups.items():
+        measured = [r for r in group_rows if r["forward_returns_pct"].get("+60m") is not None]
+        holds = [r for r in measured if r["trader_decision"] != "BUY"]
+        missed = sum(1 for r in holds if r["forward_returns_pct"]["+60m"] > 0.5)
+        avoided = sum(1 for r in holds if r["forward_returns_pct"]["+60m"] < -0.5)
+        mfe_vals = [r["mfe_pct"] for r in group_rows if r["mfe_pct"] is not None]
+        mae_vals = [r["mae_pct"] for r in group_rows if r["mae_pct"] is not None]
+        out.append({
+            "key": key,
+            "sample_size": len(group_rows),
+            "outcomes_measured": len(measured),
+            "holds_measured": len(holds),
+            "missed_opportunity_rate": round(missed / len(holds), 2) if holds else None,
+            "avoided_drawdown_rate": round(avoided / len(holds), 2) if holds else None,
+            "avg_mfe_pct": round(sum(mfe_vals) / len(mfe_vals), 2) if mfe_vals else None,
+            "avg_mae_pct": round(sum(mae_vals) / len(mae_vals), 2) if mae_vals else None,
+        })
+    out.sort(key=lambda g: g["sample_size"], reverse=True)
+    return out
+
+
+@router.get("/diagnostics/summary")
+def arena_diagnostics_summary(agent_id: Optional[int] = None, limit: int = 500, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Rollup view over /diagnostics/outcomes: the same enriched rows, pre-grouped by the
+    dimensions that matter for the volume-vs-fundamentals-vs-R:R calibration question —
+    by primary rejection reason, by symbol, by R:R bucket, by volume-ratio bucket, and by
+    the (reason, technical bias, fundamentals bias) combination. Each group reports sample
+    size, missed-opportunity rate, avoided-drawdown rate, and avg MFE/MAE, so which layer is
+    actually too conservative can be read off directly once enough sessions accumulate."""
+    if current_user.role not in ["admin", "trader"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to view Arena diagnostics.")
+
+    logs = _fetch_debate_logs(db, agent_id, None, limit)
+    rows = _compute_outcome_rows(logs)
 
     return {
-        "total_analyzed": len(results),
-        "outcomes_measured": len(measured),
-        "of_holds_missed_opportunity_gt_0.5pct": missed_opportunity,
-        "of_holds_avoided_drawdown_gt_0.5pct": avoided_drawdown,
-        "debates": results,
+        "total_debates": len(rows),
+        "by_primary_reason": _rollup(rows, lambda r: r["primary_reason"]),
+        "by_symbol": _rollup(rows, lambda r: r["symbol"]),
+        "by_risk_reward_bucket": _rollup(rows, lambda r: r["risk_reward_bucket"]),
+        "by_volume_ratio_bucket": _rollup(rows, lambda r: r["volume_ratio_bucket"]),
+        "by_reason_and_bias_combo": _rollup(rows, lambda r: r["combo_key"]),
     }
 
 
