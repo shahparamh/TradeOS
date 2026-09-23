@@ -10,6 +10,7 @@ from config import settings
 from agents.prompts import SYSTEM_PROMPT, parse_ai_response
 from utils.logger import setup_logger
 from utils.api_manager import api_key_manager
+from utils.llm_rate_limiter import pace
 
 logger = setup_logger("agent_groq")
 
@@ -67,6 +68,10 @@ async def query_groq(payload: str, system_prompt: str = SYSTEM_PROMPT) -> dict:
     }
 
     try:
+        # Spread out bursts (e.g. 2 parallel risk-review calls in one debate round) instead
+        # of firing them all in the same instant, which is what trips the 8K-TPM/min cap.
+        await pace("groq")
+
         api_key_manager.record_usage("groq", api_key)
 
         async with httpx.AsyncClient(timeout=30.0) as client:

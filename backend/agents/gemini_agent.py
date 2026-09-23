@@ -9,6 +9,7 @@ from config import settings
 from agents.prompts import SYSTEM_PROMPT, parse_ai_response
 from utils.logger import setup_logger
 from utils.api_manager import api_key_manager
+from utils.llm_rate_limiter import pace
 
 logger = setup_logger("agent_gemini")
 
@@ -32,10 +33,14 @@ async def query_gemini(payload: str, system_prompt: str = SYSTEM_PROMPT) -> dict
         }
         
     start_time = time.time()
-    
+
     try:
+        # Spread out bursts (e.g. 3 parallel analyst calls in one debate round) instead of
+        # firing them all in the same instant, which is what trips free-tier per-minute limits.
+        await pace("gemini")
+
         genai.configure(api_key=api_key)
-        
+
         # Log usage BEFORE making the call (optimistic tracking)
         api_key_manager.record_usage("gemini", api_key)
         
