@@ -14,7 +14,10 @@ from utils.logger import setup_logger
 
 logger = setup_logger("agent_github")
 
-GITHUB_API_URL = "https://models.inference.ai.azure.com/chat/completions"
+# GitHub migrated Models' inference API off models.inference.ai.azure.com (that host no
+# longer even resolves) onto models.github.ai — verified working directly against this
+# account's PAT with both "gpt-4o" and "openai/gpt-4o-mini" model names.
+GITHUB_API_URL = "https://models.github.ai/inference/chat/completions"
 
 GITHUB_STRATEGY_OVERLAY = """
 MODEL-SPECIFIC STRATEGY LOCK (GitHub):
