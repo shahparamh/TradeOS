@@ -138,18 +138,20 @@ class TradingScheduler:
             replace_existing=True
         )
 
-        # 5. Render Keep-Alive - Every 10 mins (only if BACKEND_URL is set)
+        # 5. Render Keep-Alive - Every 2 mins (only if BACKEND_URL is set)
         from config import settings
+        from datetime import datetime
         if settings.BACKEND_URL:
             self.scheduler.add_job(
                 self.ping_self,
                 "interval",
-                minutes=10,
+                minutes=2,
+                next_run_time=datetime.now(),
                 id="keep_alive_job",
                 name="Keep Render App Alive",
                 replace_existing=True
             )
-            logger.info(f"Scheduled keep-alive ping for backend: {settings.BACKEND_URL}")
+            logger.info(f"Scheduled keep-alive ping for backend every 2 mins: {settings.BACKEND_URL}")
 
         self.scheduler.start()
         logger.info("TradeOS Scheduler started.")
@@ -161,9 +163,10 @@ class TradingScheduler:
         if not settings.BACKEND_URL:
             return
         url = f"{settings.BACKEND_URL.rstrip('/')}/api/health"
+        headers = {"User-Agent": "TradeOS-KeepAlive/1.0"}
         try:
             async with httpx.AsyncClient() as client:
-                response = await client.get(url, timeout=10.0)
+                response = await client.get(url, headers=headers, timeout=10.0)
                 if response.status_code == 200:
                     logger.info(f"[Keep-Alive] Self-ping successful: {response.json()}")
                 else:

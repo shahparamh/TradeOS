@@ -22,7 +22,7 @@ class Settings:
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./tradeos.db")
 
     # Render Keep-Alive / External Backend URL
-    BACKEND_URL: str = os.getenv("BACKEND_URL", "")
+    BACKEND_URL: str = os.getenv("BACKEND_URL", os.getenv("RENDER_EXTERNAL_URL", ""))
 
     # Trading
     INITIAL_CAPITAL: float = float(os.getenv("INITIAL_CAPITAL", 5000000.0))
@@ -43,7 +43,7 @@ class Settings:
     GROK_MODEL: str = "grok-4.20-reasoning"  # Updated based on user input
     GROQ_API_KEYS: list = [k.strip() for k in os.getenv("GROQ_API_KEYS", "").split(",") if k.strip()] or [os.getenv("GROQ_API_KEY", "")]
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
-    GROQ_MODEL: str = "openai/gpt-oss-120b"  # llama-3.3-70b-versatile was retired from Groq's catalog
+    GROQ_MODEL: str = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")  # llama-3.3-70b-versatile was retired from Groq's catalog
     OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3.2")
     HF_API_KEY: str = os.getenv("HF_API_KEY", "")
     HF_MODEL: str = os.getenv("HF_MODEL", "meta-llama/Llama-3.3-70B-Instruct")
