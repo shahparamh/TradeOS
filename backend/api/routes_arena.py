@@ -42,11 +42,33 @@ def list_arena_agents(db: Session = Depends(get_db)):
             "return_pct": round(((equity - starting_capital) / starting_capital) * 100, 2) if starting_capital else 0,
             "status": "Dead" if agent.is_dead else "Alive",
             "is_dead": agent.is_dead,
+            "is_active": agent.is_active,
             "died_at": agent.died_at.isoformat() if agent.died_at else None,
             "survival_days": survival_days,
             "death_threshold": agent.death_threshold,
         })
     return result
+
+
+@router.post("/agents/{agent_id}/toggle")
+def toggle_arena_agent(agent_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Pauses/resumes a Survival agent — a deactivated agent is skipped by the next arena
+    cycle (run_arena_cycle filters on is_active fresh from the DB each run, so this takes
+    effect immediately with no restart needed) but keeps its equity/trade history intact."""
+    if current_user.role not in ["admin", "trader"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to control Arena agents.")
+
+    agent = db.query(Agent).filter(Agent.id == agent_id, Agent.mode == "SURVIVAL").first()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Survival agent not found")
+
+    agent.is_active = not agent.is_active
+    db.commit()
+    return {
+        "status": "success",
+        "is_active": agent.is_active,
+        "message": f"{agent.name} is now {'active' if agent.is_active else 'paused'}.",
+    }
 
 
 @router.get("/agents/{agent_id}")

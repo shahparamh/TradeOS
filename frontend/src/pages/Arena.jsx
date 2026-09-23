@@ -159,13 +159,15 @@ const PROVIDER_COLORS = {
     ollama: 'var(--color-chatgpt)',
 };
 
-const AgentZeroCard = ({ agent, rank }) => {
+const AgentZeroCard = ({ agent, rank, onToggle, togglingId }) => {
     const isProfit = agent.return_pct >= 0;
     const isDead = agent.is_dead;
+    const isPaused = agent.is_active === false;
+    const isToggling = togglingId === agent.id;
     const avatarColor = isDead ? 'var(--text-muted)' : (PROVIDER_COLORS[agent.provider] || 'var(--accent-blue)');
 
     return (
-        <Link to={`/arena/${agent.id}`} className={`agent-card card arena-card ${isDead ? 'dead' : ''}`} style={{ textDecoration: 'none' }}>
+        <Link to={`/arena/${agent.id}`} className={`agent-card card arena-card ${isDead ? 'dead' : ''} ${isPaused ? 'paused' : ''}`} style={{ textDecoration: 'none', position: 'relative' }}>
             <div className="ac-rank">#{rank}</div>
             <div className="ac-header">
                 <div className="ac-avatar" style={{ background: avatarColor }}>
@@ -177,7 +179,7 @@ const AgentZeroCard = ({ agent, rank }) => {
                 </div>
                 <div className={`ac-status ${isDead ? 'inactive' : 'active'}`}>
                     <span className="status-dot-sm"></span>
-                    {isDead ? 'Dead' : 'Alive'}
+                    {isDead ? 'Dead' : isPaused ? 'Paused' : 'Alive'}
                 </div>
             </div>
 
@@ -202,8 +204,27 @@ const AgentZeroCard = ({ agent, rank }) => {
                 </div>
             </div>
 
-            <div className="ac-footer">
+            <div className="ac-footer" style={{ gap: 8 }}>
                 <span className="provider-chip">{agent.provider}</span>
+                <button
+                    type="button"
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggle(agent); }}
+                    disabled={isDead || isToggling}
+                    title={isPaused ? 'Resume this agent' : 'Deactivate this agent'}
+                    style={{
+                        display: 'flex', alignItems: 'center', gap: 4,
+                        padding: '3px 8px', borderRadius: 6, fontSize: 10, fontWeight: 700,
+                        border: '1px solid var(--border-color)',
+                        background: isPaused ? 'rgba(56,217,150,0.12)' : 'rgba(255,102,115,0.1)',
+                        color: isPaused ? 'var(--green-profit, #38D996)' : 'var(--red-loss, #FF6673)',
+                        cursor: isDead ? 'not-allowed' : 'pointer',
+                        opacity: isDead ? 0.4 : 1,
+                        whiteSpace: 'nowrap',
+                    }}
+                >
+                    {isToggling ? <RefreshCw size={11} className="spin" /> : (isPaused ? <PlayCircle size={11} /> : <Siren size={11} />)}
+                    {isPaused ? 'Resume' : 'Deactivate'}
+                </button>
                 <span className="view-link">View Detail <ArrowRight size={13} /></span>
             </div>
         </Link>
@@ -216,6 +237,7 @@ const Arena = () => {
     const [loading, setLoading] = useState(true);
     const [busy, setBusy] = useState(false);
     const [showCreateModal, setShowCreateModal] = useState(false);
+    const [togglingId, setTogglingId] = useState(null);
 
     const fetchAll = () => {
         Promise.all([arenaAPI.getAgents(), arenaAPI.getStatus()])
@@ -232,6 +254,19 @@ const Arena = () => {
         const interval = setInterval(fetchAll, 15000);
         return () => clearInterval(interval);
     }, []);
+
+    const handleToggleAgent = async (agent) => {
+        setTogglingId(agent.id);
+        try {
+            await arenaAPI.toggleAgent(agent.id);
+            toast.success(`${agent.name} ${agent.is_active === false ? 'resumed' : 'deactivated'}.`);
+            fetchAll();
+        } catch (err) {
+            toast.error(err.response?.data?.detail || `Failed to update ${agent.name}.`);
+        } finally {
+            setTogglingId(null);
+        }
+    };
 
     const handleEmergencyToggle = async () => {
         setBusy(true);
@@ -335,7 +370,7 @@ const Arena = () => {
             ) : (
                 <div className="agents-grid">
                     {agents.map((agent, i) => (
-                        <AgentZeroCard key={agent.id} agent={agent} rank={i + 1} />
+                        <AgentZeroCard key={agent.id} agent={agent} rank={i + 1} onToggle={handleToggleAgent} togglingId={togglingId} />
                     ))}
                 </div>
             )}

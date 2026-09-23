@@ -81,6 +81,7 @@ export const arenaAPI = {
     getAgents: () => api.get('/arena/agents'),
     getAgentDetail: (id) => api.get(`/arena/agents/${id}`),
     createAgent: (data) => api.post('/arena/agents', data),
+    toggleAgent: (id) => api.post(`/arena/agents/${id}/toggle`),
     getStatus: () => api.get('/arena/status'),
     getMarket: () => api.get('/arena/market'),
     emergencyStop: () => api.post('/arena/emergency-stop'),
