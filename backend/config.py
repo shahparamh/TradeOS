@@ -23,7 +23,7 @@ class Settings:
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./tradeos.db")
 
     # Render Keep-Alive / External Backend URL
-    BACKEND_URL: str = os.getenv("BACKEND_URL", "")
+    BACKEND_URL: str = os.getenv("BACKEND_URL", os.getenv("RENDER_EXTERNAL_URL", ""))
 
     # Trading
     INITIAL_CAPITAL: float = float(os.getenv("INITIAL_CAPITAL", 5000000.0))
@@ -44,7 +44,7 @@ class Settings:
     GROK_MODEL: str = "grok-4.20-reasoning"  # Updated based on user input
     GROQ_API_KEYS: list = [k.strip() for k in os.getenv("GROQ_API_KEYS", "").split(",") if k.strip()] or [os.getenv("GROQ_API_KEY", "")]
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
-    GROQ_MODEL: str = "llama-3.3-70b-versatile"  # Free tier on Groq
+    GROQ_MODEL: str = os.getenv("GROQ_MODEL", "llama-3.1-70b-versatile")
     OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3.2")
     GITHUB_API_KEYS: list = [k.strip() for k in os.getenv("GITHUB_API_KEYS", "").split(",") if k.strip()] or [os.getenv("GITHUB_API_KEY", "")]
     GITHUB_API_KEY: str = os.getenv("GITHUB_API_KEY", "")
