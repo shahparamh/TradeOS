@@ -234,6 +234,193 @@ async def trigger_arena_cycle_manually():
     return {"status": "triggered", "message": "Survival Arena cycle started in background"}
 
 
+# Ordered so the FIRST matching category (by earliest string position in the reasoning
+# text) becomes the "primary" reason and any other categories found become "secondary" —
+# a rough proxy for which concern the model led with vs mentioned in passing.
+_REASON_CATEGORIES = {
+    "low_volume": ("volume", "conviction", "liquidity", "participation"),
+    "valuation": ("p/e", "pe ratio", "valuation", "premium"),
+    "leverage": ("debt-to-equity", "leverage", "debt "),
+    "growth": ("revenue", "earnings growth", "profit contraction", "revenue contraction", "growth"),
+    "technical_momentum": ("macd", "rsi", "overbought", "oversold", "resistance", "support", "bull trap", "reversion", "divergence"),
+    "risk_reward": ("risk-reward", "risk reward", "r:r", "reward-to-risk"),
+    "data_unavailable": ("unavailable", "offline", "lack of data", "no data"),
+}
+
+# Best-effort numeric extraction straight out of the LLM's own narrative — it routinely
+# cites the specific number it read (e.g. "RSI at 71.2", "P/E 86.59"), so pull those out
+# instead of re-deriving indicators from scratch.
+import re as _re
+_NUM_PATTERNS = {
+    "rsi": _re.compile(r"RSI[^\d]{0,10}(\d{1,3}(?:\.\d+)?)", _re.IGNORECASE),
+    "pe_ratio": _re.compile(r"P/E[^\d]{0,10}(\d{1,4}(?:\.\d+)?)", _re.IGNORECASE),
+}
+
+
+def _classify_reasons(text: str) -> dict:
+    text_l = (text or "").lower()
+    hits = []
+    for category, keywords in _REASON_CATEGORIES.items():
+        positions = [text_l.find(kw) for kw in keywords if kw in text_l]
+        if positions:
+            hits.append((min(positions), category))
+    hits.sort(key=lambda x: x[0])
+    categories = [c for _, c in hits]
+    # de-dupe while preserving first-seen order
+    seen = []
+    for c in categories:
+        if c not in seen:
+            seen.append(c)
+    return {
+        "primary_reason": seen[0] if seen else None,
+        "secondary_reasons": seen[1:] if len(seen) > 1 else [],
+    }
+
+
+def _extract_numeric_mentions(text: str) -> dict:
+    text = text or ""
+    out = {}
+    for key, pattern in _NUM_PATTERNS.items():
+        m = pattern.search(text)
+        if m:
+            try:
+                out[key] = float(m.group(1))
+            except ValueError:
+                pass
+    return out
+
+
+@router.get("/diagnostics/outcomes")
+def arena_diagnostics_outcomes(
+    symbol: Optional[str] = None,
+    agent_id: Optional[int] = None,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """For every stored (mostly-HOLD) debate, reconstructs what actually happened to the
+    stock afterward — forward returns at +5/+15/+30/+60 min from the decision timestamp,
+    plus max favorable/adverse excursion over that hour — using real intraday candles, not
+    the day's overall move. Also splits WHY the debate didn't result in a trade into a
+    primary reason (whichever concern the model's reasoning led with) and secondary reasons
+    (mentioned but not the lead), so "is low volume the real bottleneck vs fundamentals"
+    can be answered from accumulated data instead of re-reading transcripts by hand."""
+    if current_user.role not in ["admin", "trader"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to view Arena diagnostics.")
+
+    from datetime import timezone as _tz, timedelta as _td
+    import pandas as pd
+    from data.market_fetcher import fetch_intraday_candles
+
+    query = db.query(ArenaDebateLog).order_by(ArenaDebateLog.created_at.desc())
+    if agent_id is not None:
+        query = query.filter(ArenaDebateLog.agent_id == agent_id)
+    if symbol is not None:
+        query = query.filter(ArenaDebateLog.symbol == symbol)
+    logs = query.limit(limit).all()
+
+    IST = _tz(_td(hours=5, minutes=30))
+
+    # Group by symbol so each symbol's candles are fetched once, not once per debate.
+    by_symbol: dict[str, list] = {}
+    for log in logs:
+        by_symbol.setdefault(log.symbol, []).append(log)
+
+    results = []
+    for sym, sym_logs in by_symbol.items():
+        try:
+            candles = fetch_intraday_candles(sym, "5m", "5d")
+        except Exception:
+            candles = None
+
+        for log in sym_logs:
+            trader = _safe_json(log.trader_proposal)
+            pm = _safe_json(log.portfolio_manager_decision)
+            risk_engine = _safe_json(log.risk_engine_result)
+            reports = _safe_json(log.analyst_reports)
+            tech = reports.get("technical", {}) if isinstance(reports, dict) else {}
+            fund = reports.get("fundamentals", {}) if isinstance(reports, dict) else {}
+            sent = reports.get("sentiment", {}) if isinstance(reports, dict) else {}
+
+            # Reasoning to classify: the PM's if it overrode a BUY proposal, else the trader's.
+            reasoning_source = pm.get("reasoning") if (trader.get("decision") == "BUY" and pm) else trader.get("reasoning")
+            reason_split = _classify_reasons(reasoning_source)
+
+            entry = trader.get("entry_price")
+            sl = trader.get("stop_loss")
+            target = trader.get("target")
+            rr = trader.get("risk_reward_ratio")
+            if rr is None and entry and sl and target:
+                stop_distance = abs(entry - sl)
+                rr = round(abs(target - entry) / stop_distance, 2) if stop_distance > 0 else None
+
+            outcome = {"decision_price": None, "forward_returns_pct": {}, "mfe_pct": None, "mae_pct": None, "note": None}
+            if candles is not None and not candles.empty and log.created_at:
+                decision_time_ist = log.created_at.replace(tzinfo=_tz.utc).astimezone(IST)
+                # Nearest candle at/before the decision timestamp = the price the debate was actually reasoning about.
+                prior = candles[candles.index <= decision_time_ist]
+                if not prior.empty:
+                    decision_price = float(prior.iloc[-1]["Close"])
+                    outcome["decision_price"] = round(decision_price, 2)
+
+                    window_end = decision_time_ist + _td(minutes=60)
+                    window = candles[(candles.index > decision_time_ist) & (candles.index <= window_end)]
+
+                    for horizon in (5, 15, 30, 60):
+                        target_time = decision_time_ist + _td(minutes=horizon)
+                        at_or_after = candles[candles.index >= target_time]
+                        if not at_or_after.empty and decision_price:
+                            price_then = float(at_or_after.iloc[0]["Close"])
+                            outcome["forward_returns_pct"][f"+{horizon}m"] = round((price_then - decision_price) / decision_price * 100, 2)
+                        else:
+                            outcome["forward_returns_pct"][f"+{horizon}m"] = None
+
+                    if not window.empty and decision_price:
+                        mfe = (float(window["High"].max()) - decision_price) / decision_price * 100
+                        mae = (float(window["Low"].min()) - decision_price) / decision_price * 100
+                        outcome["mfe_pct"] = round(mfe, 2)
+                        outcome["mae_pct"] = round(mae, 2)
+                    if window.empty:
+                        outcome["note"] = "Not enough time has passed since this decision to measure a 60-min outcome yet."
+                else:
+                    outcome["note"] = "No candle found at or before the decision timestamp (outside available history)."
+            else:
+                outcome["note"] = "Candle data unavailable for this symbol."
+
+            results.append({
+                "symbol": sym,
+                "created_at": log.created_at.isoformat() if log.created_at else None,
+                "trader_decision": trader.get("decision"),
+                "final_action": log.final_action,
+                "primary_reason": reason_split["primary_reason"],
+                "secondary_reasons": reason_split["secondary_reasons"],
+                "numeric_mentions": _extract_numeric_mentions(reasoning_source),
+                "technical_summary": tech.get("summary"),
+                "fundamentals_summary": fund.get("summary"),
+                "sentiment_summary": sent.get("summary"),
+                "proposed_entry": entry,
+                "proposed_stop_loss": sl,
+                "proposed_target": target,
+                "risk_reward_ratio": rr,
+                **outcome,
+            })
+
+    # Quick aggregate: of the debates where we could measure a 60-min outcome, how often
+    # would staying out (HOLD) have been correct (price fell or stayed flat) vs a missed
+    # opportunity (price kept running)?
+    measured = [r for r in results if r["forward_returns_pct"].get("+60m") is not None]
+    missed_opportunity = sum(1 for r in measured if r["trader_decision"] != "BUY" and r["forward_returns_pct"]["+60m"] > 0.5)
+    avoided_drawdown = sum(1 for r in measured if r["trader_decision"] != "BUY" and r["forward_returns_pct"]["+60m"] < -0.5)
+
+    return {
+        "total_analyzed": len(results),
+        "outcomes_measured": len(measured),
+        "of_holds_missed_opportunity_gt_0.5pct": missed_opportunity,
+        "of_holds_avoided_drawdown_gt_0.5pct": avoided_drawdown,
+        "debates": results,
+    }
+
+
 def _safe_json(text):
     if not text:
         return {}
