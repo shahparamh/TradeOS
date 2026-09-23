@@ -43,10 +43,26 @@
 .topbar-search-result .tsr-label { color: var(--text-primary); font-weight: 600; }
 .topbar-search-result .tsr-meta { color: var(--text-muted); font-size: 10px; text-transform: uppercase; }
 .topbar-ticker {
-    display: flex; align-items: center; gap: var(--space-4); flex: 1; overflow-x: auto;
+    display: flex; align-items: center; flex: 1; overflow: hidden;
     font-family: var(--font-mono); font-size: 12px;
+    /* Fades the scrolling content at both edges instead of a hard clip */
+    mask-image: linear-gradient(to right, transparent 0, black 24px, black calc(100% - 24px), transparent 100%);
+    -webkit-mask-image: linear-gradient(to right, transparent 0, black 24px, black calc(100% - 24px), transparent 100%);
 }
-.topbar-ticker-item { display: flex; align-items: center; gap: 6px; white-space: nowrap; flex-shrink: 0; }
+.topbar-ticker-track {
+    display: flex; align-items: center; gap: var(--space-4); flex-shrink: 0;
+    animation: ticker-scroll linear infinite;
+    animation-duration: var(--ticker-duration, 20s);
+}
+.topbar-ticker:hover .topbar-ticker-track { animation-play-state: paused; }
+@keyframes ticker-scroll {
+    from { transform: translateX(0); }
+    to { transform: translateX(-50%); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .topbar-ticker-track { animation: none; }
+}
+.topbar-ticker-item { display: flex; align-items: center; gap: 6px; white-space: nowrap; flex-shrink: 0; padding-right: var(--space-4); }
 .topbar-ticker-item .tt-name { color: var(--text-muted); text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; }
 .topbar-ticker-item .tt-price { color: var(--text-primary); font-weight: 600; }
 .topbar-ticker-item .tt-change.up { color: var(--green-profit); }

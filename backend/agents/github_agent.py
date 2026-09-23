@@ -14,9 +14,13 @@ from utils.logger import setup_logger
 
 logger = setup_logger("agent_github")
 
-# GitHub migrated Models' inference API off models.inference.ai.azure.com (that host no
-# longer even resolves) onto models.github.ai — verified working directly against this
-# account's PAT with both "gpt-4o" and "openai/gpt-4o-mini" model names.
+# STATUS: BROKEN, provider deactivated (see database Agent.is_active) — do not re-enable
+# without re-verifying. The old models.inference.ai.azure.com host no longer resolves at
+# all (confirmed dead). This models.github.ai URL resolves to a real GitHub IP but every
+# request — including ones with a garbage/invalid bearer token — gets an identical plain
+# "OK" text response instead of a JSON chat-completion, so it is NOT reaching real
+# authenticated inference. Left as-is (better than a dead host) pending the actual current
+# GitHub Models endpoint/auth requirements, which have not been confirmed.
 GITHUB_API_URL = "https://models.github.ai/inference/chat/completions"
 
 GITHUB_STRATEGY_OVERLAY = """

@@ -130,18 +130,29 @@ const TopBar = () => {
             </div>
 
             <div className="topbar-ticker">
-                {indices.map(idx => {
-                    const pct = idx.percent_change || 0;
-                    return (
-                        <div className="topbar-ticker-item" key={idx.symbol}>
-                            <span className="tt-name">{idx.symbol}</span>
-                            <span className="tt-price">{idx.price?.toLocaleString('en-IN')}</span>
-                            <span className={`tt-change ${pct >= 0 ? 'up' : 'down'}`}>
-                                {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
-                            </span>
-                        </div>
-                    );
-                })}
+                {/* One track, content duplicated back-to-back inside it. Animating this
+                    single track from translateX(0) to translateX(-50%) moves it exactly
+                    one copy's width — so the duplicate is already in position to take
+                    over, and the loop restart is invisible. */}
+                <div
+                    className="topbar-ticker-track"
+                    style={{ '--ticker-duration': `${Math.max(indices.length * 6, 14)}s` }}
+                >
+                    {[0, 1].map(copy => (
+                        indices.map(idx => {
+                            const pct = idx.percent_change || 0;
+                            return (
+                                <div className="topbar-ticker-item" key={`${copy}-${idx.symbol}`} aria-hidden={copy === 1}>
+                                    <span className="tt-name">{idx.symbol}</span>
+                                    <span className="tt-price">{idx.price?.toLocaleString('en-IN')}</span>
+                                    <span className={`tt-change ${pct >= 0 ? 'up' : 'down'}`}>
+                                        {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
+                                    </span>
+                                </div>
+                            );
+                        })
+                    ))}
+                </div>
             </div>
 
             <div className="topbar-session">
