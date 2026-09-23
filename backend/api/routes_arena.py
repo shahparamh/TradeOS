@@ -232,3 +232,133 @@ async def trigger_arena_cycle_manually():
     from main import trading_scheduler
     asyncio.create_task(trading_scheduler.run_arena_cycle(ignore_hours=True))
     return {"status": "triggered", "message": "Survival Arena cycle started in background"}
+
+
+def _safe_json(text):
+    if not text:
+        return {}
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+
+
+# Keyword heuristics for classifying WHY a debate didn't result in a trade — not a precise
+# parse of the LLM's reasoning, just enough to separate "never got to R:R because fundamentals/
+# volume killed it first" from "got to R:R and failed that specific bar", which is exactly the
+# distinction needed to tell a genuine policy-calibration question (is 2:1 realistic for this
+# symbol's volatility?) apart from a symbol that never had a shot regardless of R:R.
+_FUNDAMENTAL_KEYWORDS = ("p/e", "pe ratio", "valuation", "leverage", "debt", "revenue", "earnings", "fundamental", "growth")
+_VOLUME_KEYWORDS = ("volume", "conviction", "liquidity", "participation")
+_RR_KEYWORDS = ("risk-reward", "risk reward", "r:r", "reward-to-risk", "reward to risk")
+
+
+def _classify_blocker(trader: dict, pm: dict, risk_engine: dict) -> str:
+    if trader.get("decision") != "BUY":
+        reasoning = (trader.get("reasoning") or "").lower()
+        if any(k in reasoning for k in _RR_KEYWORDS):
+            return "risk_reward_gate (trader)"
+        if any(k in reasoning for k in _FUNDAMENTAL_KEYWORDS):
+            return "fundamentals_gate (trader)"
+        if any(k in reasoning for k in _VOLUME_KEYWORDS):
+            return "volume_conviction_gate (trader)"
+        return "trader_hold_other"
+
+    if pm and pm.get("decision") != "BUY":
+        reasoning = (pm.get("reasoning") or "").lower()
+        if any(k in reasoning for k in _RR_KEYWORDS):
+            return "risk_reward_gate (portfolio_manager)"
+        if any(k in reasoning for k in _VOLUME_KEYWORDS):
+            return "volume_conviction_gate (portfolio_manager)"
+        if any(k in reasoning for k in _FUNDAMENTAL_KEYWORDS):
+            return "fundamentals_gate (portfolio_manager)"
+        return "pm_override_other"
+
+    if risk_engine and not risk_engine.get("approved"):
+        return f"risk_engine_gate: {risk_engine.get('rejection_reason')}"
+
+    return "approved"
+
+
+@router.get("/diagnostics")
+def arena_diagnostics(agent_id: Optional[int] = None, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Self-serve version of the manual debate-log analysis: for every stored debate, shows
+    what the trader actually proposed (entry/stop/target/R:R when it got that far) and
+    classifies WHY it didn't result in a trade — so a symbol that never reaches the R:R
+    question (killed by fundamentals/volume first) is visibly distinct from one that reaches
+    R:R and fails that specific bar. Aggregates per symbol so volatility-vs-policy questions
+    (e.g. "is 2:1 R:R realistic for this symbol?") can be answered from real accumulated data
+    instead of manually re-reading transcripts each time."""
+    if current_user.role not in ["admin", "trader"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to view Arena diagnostics.")
+
+    query = db.query(ArenaDebateLog).order_by(ArenaDebateLog.created_at.desc())
+    if agent_id is not None:
+        query = query.filter(ArenaDebateLog.agent_id == agent_id)
+    logs = query.limit(1000).all()
+
+    per_symbol: dict[str, dict] = {}
+    rows = []
+
+    for log in logs:
+        trader = _safe_json(log.trader_proposal)
+        pm = _safe_json(log.portfolio_manager_decision)
+        risk_engine = _safe_json(log.risk_engine_result)
+        blocker = _classify_blocker(trader, pm, risk_engine)
+
+        entry = trader.get("entry_price")
+        sl = trader.get("stop_loss")
+        target = trader.get("target")
+        rr = trader.get("risk_reward_ratio")
+        if rr is None and entry and sl and target:
+            stop_distance = abs(entry - sl)
+            if stop_distance > 0:
+                rr = round(abs(target - entry) / stop_distance, 2)
+
+        rows.append({
+            "agent_id": log.agent_id,
+            "symbol": log.symbol,
+            "created_at": log.created_at.isoformat() if log.created_at else None,
+            "trader_decision": trader.get("decision"),
+            "entry_price": entry,
+            "stop_loss": sl,
+            "target": target,
+            "risk_reward_ratio": rr,
+            "blocker": blocker,
+            "final_action": log.final_action,
+        })
+
+        bucket = per_symbol.setdefault(log.symbol, {
+            "symbol": log.symbol,
+            "total_debates": 0,
+            "buy_proposals": 0,
+            "reached_pm": 0,
+            "approved_trades": 0,
+            "risk_reward_ratios": [],
+            "blocker_counts": {},
+        })
+        bucket["total_debates"] += 1
+        if trader.get("decision") == "BUY":
+            bucket["buy_proposals"] += 1
+            if rr is not None:
+                bucket["risk_reward_ratios"].append(rr)
+        if pm:
+            bucket["reached_pm"] += 1
+        if blocker == "approved":
+            bucket["approved_trades"] += 1
+        bucket["blocker_counts"][blocker] = bucket["blocker_counts"].get(blocker, 0) + 1
+
+    summary = []
+    for bucket in per_symbol.values():
+        rrs = bucket.pop("risk_reward_ratios")
+        bucket["avg_risk_reward_when_proposed"] = round(sum(rrs) / len(rrs), 2) if rrs else None
+        bucket["min_risk_reward_when_proposed"] = min(rrs) if rrs else None
+        bucket["max_risk_reward_when_proposed"] = max(rrs) if rrs else None
+        summary.append(bucket)
+    summary.sort(key=lambda b: b["buy_proposals"], reverse=True)
+
+    return {
+        "total_debates_analyzed": len(logs),
+        "per_symbol_summary": summary,
+        "debates": rows,
+    }
