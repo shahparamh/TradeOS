@@ -73,9 +73,20 @@ async def query_gemini(payload: str, system_prompt: str = SYSTEM_PROMPT) -> dict
     except Exception as e:
         err_msg = str(e)
         masked_key = api_key[:6] + "..." + api_key[-4:] if len(api_key) > 10 else "unknown"
-        
-        if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg or "quota" in err_msg.lower():
-            logger.warning(f"Gemini API key {masked_key} rate-limited/exhausted.")
+
+        # get_key() is STICKY — it keeps returning the same key until it's marked
+        # exhausted, so any error that doesn't trigger a rotation here gets retried on
+        # this same key forever, permanently blocking healthier keys later in the list
+        # from ever being tried. A 403 ("project denied access") is just as key-fatal as
+        # a 429/quota error for this purpose, even though it isn't a rate limit — rotate
+        # away from it too rather than only recognizing quota-shaped errors.
+        is_key_fatal = (
+            "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg or "quota" in err_msg.lower()
+            or "403" in err_msg or "PERMISSION_DENIED" in err_msg
+            or "401" in err_msg or "UNAUTHENTICATED" in err_msg or "API_KEY_INVALID" in err_msg
+        )
+        if is_key_fatal:
+            logger.warning(f"Gemini API key {masked_key} rejected ({err_msg[:120]}) — rotating to next key.")
             api_key_manager.mark_exhausted("gemini", api_key)
         else:
             logger.error(f"Gemini API key {masked_key} error: {err_msg}")

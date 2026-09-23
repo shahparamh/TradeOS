@@ -79,19 +79,23 @@ async def query_groq(payload: str, system_prompt: str = SYSTEM_PROMPT) -> dict:
 
         latency_ms = int((time.time() - start_time) * 1000)
 
-        if response.status_code == 429:
+        # get_key() is STICKY — it keeps returning the same key until it's marked
+        # exhausted, so a key rejected for any reason (not just 429) that doesn't trigger
+        # a rotation here gets retried on this same dead key forever, permanently blocking
+        # healthier keys later in the list from ever being tried.
+        if response.status_code in (429, 401, 403):
             masked_key = api_key[:6] + "..." + api_key[-4:] if len(api_key) > 10 else "unknown"
-            logger.warning(f"Groq API key {masked_key} rate-limited (429). Marking exhausted.")
+            logger.warning(f"Groq API key {masked_key} rejected (status {response.status_code}) — rotating to next key.")
             api_key_manager.mark_exhausted("groq", api_key)
             return {
                 "agent": "Groq-Llama",
                 "provider": "groq",
                 "decision": "HOLD",
                 "confidence": 0,
-                "reasoning": "Rate limited (429).",
+                "reasoning": f"API error {response.status_code} (key rotated).",
                 "is_valid": False,
                 "latency_ms": latency_ms,
-                "raw_response": "Rate limit",
+                "raw_response": response.text,
             }
 
         if response.status_code != 200:
