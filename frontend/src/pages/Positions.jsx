@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import api, { brokerAPI } from '../services/api';
 import CandlestickChart from '../components/CandlestickChart';
+import { toChartTime } from '../utils/chartTime';
 import toast from 'react-hot-toast';
 
 const PositionCard = ({ pos, onRefresh, onViewChart }) => {
@@ -151,10 +152,8 @@ const Positions = () => {
             const formatted = res.data
                 .filter(c => c && c.open !== null && c.high !== null && c.low !== null && c.close !== null)
                 .map(c => {
-                    const date = new Date(c.datetime);
-                    const time = Math.floor(date.getTime() / 1000);
                     return {
-                        time: time,
+                        time: toChartTime(c.datetime),
                         open: Number(c.open),
                         high: Number(c.high),
                         low: Number(c.low),
@@ -186,12 +185,18 @@ const Positions = () => {
 
     // Real-Time Live WebSocket Tick Connection
     useEffect(() => {
-        const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+        // api.js defaults VITE_API_URL to the relative "/api" (same-origin in prod, proxied
+        // to :8000 in dev — see vite.config.js), so the old fallback here of a literal
+        // 'http://localhost:8000/api' was stale: in production it tried to open a WebSocket
+        // to the VIEWER's own localhost:8000, which doesn't exist, so this silently never
+        // connected. Always derive the host from window.location unless VITE_API_URL was
+        // explicitly overridden to a full absolute URL (split-service deployment).
+        const explicitApiUrl = import.meta.env.VITE_API_URL;
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        
+
         let wsUrl;
-        if (baseUrl.startsWith('http://') || baseUrl.startsWith('https://')) {
-            const urlObj = new URL(baseUrl);
+        if (explicitApiUrl && (explicitApiUrl.startsWith('http://') || explicitApiUrl.startsWith('https://'))) {
+            const urlObj = new URL(explicitApiUrl);
             wsUrl = `${wsProtocol}//${urlObj.host}/api/ws/market`;
         } else {
             wsUrl = `${wsProtocol}//${window.location.host}/api/ws/market`;

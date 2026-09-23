@@ -1,10 +1,11 @@
 import React, { useEffect, useRef } from 'react';
-import { createChart, CrosshairMode, CandlestickSeries } from 'lightweight-charts';
+import { createChart, CrosshairMode, CandlestickSeries, createSeriesMarkers } from 'lightweight-charts';
+import { nowChartTime } from '../utils/chartTime';
 
-const CandlestickChart = ({ 
-    data, 
-    markers = [], 
-    height = 500, 
+const CandlestickChart = ({
+    data,
+    markers = [],
+    height = 500,
     liveTick = null,
     timeframe = '5d',
     entryPrice = null,
@@ -15,12 +16,18 @@ const CandlestickChart = ({
     const chartRef = useRef(null);
     const seriesRef = useRef(null);
     const activeBarRef = useRef(null);
+    const priceLinesRef = useRef([]);
+    const hasFitContentRef = useRef(false);
+    const markersPrimitiveRef = useRef(null);
 
     // Reset live bar tracker when historical timeframe data changes
     useEffect(() => {
         activeBarRef.current = null;
     }, [data]);
 
+    // Create the chart+series ONCE (and on height change). A background candle refresh
+    // must not land here — recreating the whole chart on every poll would wipe the
+    // viewer's zoom/pan and cause a visible flicker every cycle.
     useEffect(() => {
         if (!chartContainerRef.current) return;
 
@@ -59,49 +66,9 @@ const CandlestickChart = ({
             wickUpColor: '#38D996',
         });
 
-        candlestickSeries.setData(data);
         seriesRef.current = candlestickSeries;
-
-        // Draw Entry, Target, and Stop Loss Price Lines
-        if (entryPrice) {
-            candlestickSeries.createPriceLine({
-                price: Number(entryPrice),
-                color: '#68B7FF', // Blue for Entry
-                lineWidth: 2,
-                lineStyle: 2, // Dashed
-                axisLabelVisible: true,
-                title: 'Entry Price',
-            });
-        }
-
-        if (targetPrice) {
-            candlestickSeries.createPriceLine({
-                price: Number(targetPrice),
-                color: '#38D996', // Green for Target
-                lineWidth: 2,
-                lineStyle: 2, // Dashed
-                axisLabelVisible: true,
-                title: 'Target (TGT)',
-            });
-        }
-
-        if (stopLoss) {
-            candlestickSeries.createPriceLine({
-                price: Number(stopLoss),
-                color: '#FF6673', // Red for Stop Loss
-                lineWidth: 2,
-                lineStyle: 2, // Dashed
-                axisLabelVisible: true,
-                title: 'Stop Loss (SL)',
-            });
-        }
-
-        if (markers.length > 0) {
-            candlestickSeries.setMarkers(markers);
-        }
-
-        chart.timeScale().fitContent();
         chartRef.current = chart;
+        hasFitContentRef.current = false;
 
         const handleResize = () => {
             chart.applyOptions({ width: chartContainerRef.current.clientWidth });
@@ -112,16 +79,87 @@ const CandlestickChart = ({
         return () => {
             window.removeEventListener('resize', handleResize);
             chart.remove();
+            chartRef.current = null;
+            seriesRef.current = null;
+            priceLinesRef.current = [];
+            markersPrimitiveRef.current = null;
         };
-    }, [data, markers, height, entryPrice, targetPrice, stopLoss]);
+    }, [height]);
+
+    // Update candle data in place on every prop change (including silent background
+    // refreshes) instead of tearing down the chart. Only auto-fits the viewport the
+    // first time data arrives for this chart instance, so later polls don't yank the
+    // viewer's zoom/pan back to "fit all".
+    useEffect(() => {
+        if (!seriesRef.current) return;
+        seriesRef.current.setData(data || []);
+        if (!hasFitContentRef.current && data && data.length > 0) {
+            chartRef.current?.timeScale().fitContent();
+            hasFitContentRef.current = true;
+        }
+    }, [data]);
+
+    // Markers change far less often than data — keep as its own effect.
+    // lightweight-charts v5 moved markers off the series onto a separate primitive
+    // (series.setMarkers was removed) — this was previously silently broken since it
+    // only ever ran when markers.length > 0, and nothing in the app passes any yet.
+    useEffect(() => {
+        if (!seriesRef.current) return;
+        if (!markersPrimitiveRef.current) {
+            markersPrimitiveRef.current = createSeriesMarkers(seriesRef.current, markers || []);
+        } else {
+            markersPrimitiveRef.current.setMarkers(markers || []);
+        }
+    }, [markers]);
+
+    // Entry/Target/Stop price lines: remove the previous set before drawing new ones,
+    // since lightweight-charts has no "update" for an existing price line.
+    useEffect(() => {
+        if (!seriesRef.current) return;
+        priceLinesRef.current.forEach(line => seriesRef.current.removePriceLine(line));
+        priceLinesRef.current = [];
+
+        if (entryPrice) {
+            priceLinesRef.current.push(seriesRef.current.createPriceLine({
+                price: Number(entryPrice),
+                color: '#68B7FF',
+                lineWidth: 2,
+                lineStyle: 2,
+                axisLabelVisible: true,
+                title: 'Entry Price',
+            }));
+        }
+        if (targetPrice) {
+            priceLinesRef.current.push(seriesRef.current.createPriceLine({
+                price: Number(targetPrice),
+                color: '#38D996',
+                lineWidth: 2,
+                lineStyle: 2,
+                axisLabelVisible: true,
+                title: 'Target (TGT)',
+            }));
+        }
+        if (stopLoss) {
+            priceLinesRef.current.push(seriesRef.current.createPriceLine({
+                price: Number(stopLoss),
+                color: '#FF6673',
+                lineWidth: 2,
+                lineStyle: 2,
+                axisLabelVisible: true,
+                title: 'Stop Loss (SL)',
+            }));
+        }
+    }, [entryPrice, targetPrice, stopLoss]);
 
     // Handle incoming continuous live price ticks (updating the active bar with high frequency)
     useEffect(() => {
         if (seriesRef.current && liveTick) {
-            const timeVal = liveTick.time 
-                ? (String(liveTick.time).length > 10 ? Math.floor(liveTick.time / 1000) : liveTick.time)
-                : Math.floor(Date.now() / 1000);
-            
+            // The server sends `time` as a plain date STRING, not an epoch — dividing that by
+            // 1000 previously produced NaN and silently dropped every live-tick update. What
+            // actually matters here is which candle "bucket" is currently forming, so just use
+            // the client clock (already IST-shifted the same way historical candles are).
+            const timeVal = nowChartTime();
+
             // Map timeframe string to seconds
             let roundSeconds = 300; // default 5 minutes
             if (timeframe === '1m') roundSeconds = 3600; // 1 hour

@@ -1,7 +1,13 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { RefreshCw } from 'lucide-react';
 import api from '../services/api';
 import CandlestickChart from './CandlestickChart';
+import { toChartTime } from '../utils/chartTime';
+
+// How often to silently re-fetch candles in the background so the chart keeps moving
+// without a manual refresh. Matches the backend's 60s TTL cache on intraday candles —
+// polling faster than that would just re-serve the same cached response.
+const REFRESH_MS = 60000;
 
 const TIMEFRAMES = [
     { key: '1D', interval: '5m', period: '1d' },
@@ -16,15 +22,15 @@ const ChartPanel = ({ symbol, quote }) => {
     const [candles, setCandles] = useState([]);
     const [loading, setLoading] = useState(true);
 
-    const fetchCandles = useCallback(async (sym, tf) => {
+    const fetchCandles = useCallback(async (sym, tf, { silent = false } = {}) => {
         if (!sym) return;
-        setLoading(true);
+        if (!silent) setLoading(true);
         try {
             const { interval, period } = TIMEFRAMES.find(t => t.key === tf);
             const res = await api.get(`/market/candles/${sym}?interval=${interval}&period=${period}`);
             const formatted = (res.data || [])
                 .map(c => ({
-                    time: Math.floor(new Date(c.datetime).getTime() / 1000),
+                    time: toChartTime(c.datetime),
                     open: c.open,
                     high: c.high,
                     low: c.low,
@@ -33,14 +39,18 @@ const ChartPanel = ({ symbol, quote }) => {
                 .sort((a, b) => a.time - b.time);
             setCandles(formatted);
         } catch (_) {
-            setCandles([]);
+            if (!silent) setCandles([]);
         } finally {
-            setLoading(false);
+            if (!silent) setLoading(false);
         }
     }, []);
 
     useEffect(() => {
         fetchCandles(symbol, timeframe);
+        // Keep the chart moving on its own — re-fetch quietly in the background instead of
+        // only ever loading once per symbol/timeframe click.
+        const interval = setInterval(() => fetchCandles(symbol, timeframe, { silent: true }), REFRESH_MS);
+        return () => clearInterval(interval);
     }, [symbol, timeframe, fetchCandles]);
 
     const pct = quote?.percent_change;

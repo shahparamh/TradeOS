@@ -4,6 +4,7 @@ import { TrendingUp, TrendingDown, BarChart2, RefreshCw, Activity, Cpu, Search, 
 import api, { marketAPI } from '../services/api';
 import CandlestickChart from '../components/CandlestickChart';
 import { NIFTY50_SYMBOLS } from '../utils/symbols';
+import { toChartTime } from '../utils/chartTime';
 
 const SENTIMENT_STYLE = {
   positive: { bg: 'var(--green-glow)', color: 'var(--green-profit)' },
@@ -13,7 +14,7 @@ const SENTIMENT_STYLE = {
 
 const toChartCandles = (candles) => (candles || [])
   .map(c => ({
-    time: Math.floor(new Date(c.datetime).getTime() / 1000),
+    time: toChartTime(c.datetime),
     open: c.open,
     high: c.high,
     low: c.low,
@@ -58,17 +59,13 @@ const Market = () => {
 
     try {
       const res = await api.get(`/market/candles/${symbol}?interval=${interval}&period=${period}`);
-      const formatted = res.data.map(c => {
-        const date = new Date(c.datetime);
-        const time = Math.floor(date.getTime() / 1000);
-        return {
-          time: time,
-          open: c.open,
-          high: c.high,
-          low: c.low,
-          close: c.close
-        };
-      }).sort((a, b) => a.time - b.time);
+      const formatted = res.data.map(c => ({
+        time: toChartTime(c.datetime),
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close
+      })).sort((a, b) => a.time - b.time);
       setChartData(formatted);
     } catch (err) {
       console.error("Failed to load chart data:", err);
