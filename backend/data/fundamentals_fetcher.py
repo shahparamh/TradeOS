@@ -17,6 +17,18 @@ _cache_lock = threading.Lock()
 _fundamentals_cache: dict[str, tuple[dict, str]] = {}
 _last_refresh_date: str | None = None
 
+# Yahoo sometimes answers a request with a real (non-empty) response that's nonetheless
+# missing all the actual financial fields — seen in practice from Render's outbound IP
+# getting a stripped-down reply where a home/dev IP gets the full one. That response
+# doesn't raise, so it used to get cached as "successful" for a full 24h with every field
+# null. These are the fields that should never ALL be null for a real equity — if they are,
+# treat the fetch as a soft failure instead of caching it for the rest of the day.
+_MEANINGFUL_FIELDS = ("market_cap", "pe_ratio", "pb_ratio", "eps", "sector", "industry")
+
+
+def _is_effectively_empty(data: dict) -> bool:
+    return all(data.get(k) is None for k in _MEANINGFUL_FIELDS)
+
 
 def _is_refresh_window(now) -> bool:
     t = now.time()
@@ -82,6 +94,9 @@ def fetch_yf_fundamentals(symbol: str) -> dict:
     if _is_refresh_window(now):
         try:
             data = _fetch_remote_fundamentals(symbol)
+            if _is_effectively_empty(data):
+                logger.warning(f"Fundamentals for {symbol} came back empty (likely a degraded Yahoo response) — not caching, will retry on next call.")
+                return cached[0] if cached else data
             with _cache_lock:
                 _fundamentals_cache[symbol] = (data, today_str)
             return data
@@ -90,16 +105,19 @@ def fetch_yf_fundamentals(symbol: str) -> dict:
             if cached:
                 return cached[0]
             return {"symbol": symbol}
-    
+
     # Outside refresh window: if cache hit, return it
     if cached:
         logger.info(f"Returning cached fundamentals for {symbol} outside refresh window.")
         return cached[0]
-    
+
     # Outside refresh window + cache miss: fetch on-demand for trading
     logger.debug(f"On-demand fundamentals fetch for {symbol} during trading hours (cache miss).")
     try:
         data = _fetch_remote_fundamentals(symbol)
+        if _is_effectively_empty(data):
+            logger.warning(f"On-demand fundamentals for {symbol} came back empty (likely a degraded Yahoo response) — not caching, will retry next time.")
+            return data
         with _cache_lock:
             _fundamentals_cache[symbol] = (data, today_str)
         return data
@@ -122,9 +140,16 @@ def refresh_daily_fundamentals(symbols: list[str], force: bool = False) -> None:
                 return
 
     refreshed = 0
+    empty = 0
     for symbol in symbols:
         try:
             data = _fetch_remote_fundamentals(symbol)
+            if _is_effectively_empty(data):
+                # Don't cache it — leaves this symbol as a cache miss, so the on-demand
+                # path in fetch_yf_fundamentals retries it individually during the day
+                # instead of it being stuck empty until tomorrow's refresh.
+                empty += 1
+                continue
             with _cache_lock:
                 _fundamentals_cache[symbol] = (data, today_str)
             refreshed += 1
@@ -133,5 +158,5 @@ def refresh_daily_fundamentals(symbols: list[str], force: bool = False) -> None:
 
     with _cache_lock:
         _last_refresh_date = today_str
-    logger.info(f"Daily fundamentals refresh complete. Updated {refreshed}/{len(symbols)} symbols.")
+    logger.info(f"Daily fundamentals refresh complete. Updated {refreshed}/{len(symbols)} symbols ({empty} came back empty and will retry on-demand).")
 
