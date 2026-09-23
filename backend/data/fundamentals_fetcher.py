@@ -7,6 +7,7 @@ import yfinance as yf
 from utils.helpers import get_ist_now
 from utils.logger import setup_logger
 from utils.rate_limiter import rate_limited_call
+from utils.yf_session import get_yf_session
 
 logger = setup_logger("fundamentals_fetcher")
 
@@ -54,7 +55,7 @@ def _fetch_remote_fundamentals(symbol: str) -> dict:
             "debt_to_equity": None
         }
 
-    ticker = yf.Ticker(symbol)
+    ticker = yf.Ticker(symbol, session=get_yf_session())
     info = rate_limited_call(lambda: ticker.info)
 
     if not info:
