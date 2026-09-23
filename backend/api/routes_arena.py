@@ -664,3 +664,148 @@ def arena_diagnostics(agent_id: Optional[int] = None, db: Session = Depends(get_
         "per_symbol_summary": summary,
         "debates": rows,
     }
+
+
+_FUNNEL_ORDER = ["evaluated", "trader_buy_proposed", "pm_approved", "risk_engine_approved"]
+
+
+@router.get("/diagnostics/funnel")
+def arena_diagnostics_funnel(agent_id: Optional[int] = None, limit: int = 1000, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Answers "why isn't this converting to trades" directly, instead of describing
+    rejection quality in isolation:
+    - overall + per-symbol conversion funnel (evaluated -> trader BUY -> PM keeps it ->
+      risk engine approves), so you can see exactly which stage kills the most candidates
+    - near-miss analysis: HOLDs blocked by exactly ONE reason (no stacking) that went on to
+      show positive MFE — the closest available proxy for "would this have worked if that
+      one filter were relaxed"
+    - stacking check: does missed-opportunity rate rise as the number of cited reasons goes
+      up, i.e. are multiple conservative filters compounding into an effectively stricter bar
+      than any single one intends
+    - per-reason "protectiveness": avg MAE avoided vs avg MFE missed, so a reason that mostly
+      just suppresses frequency (small MAE, real MFE missed) reads differently from one that's
+      genuinely catching real drawdowns (large negative MAE)."""
+    if current_user.role not in ["admin", "trader"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to view Arena diagnostics.")
+
+    logs = _fetch_debate_logs(db, agent_id, None, limit)
+    rows = _compute_outcome_rows(logs)
+
+    # --- Overall + per-symbol funnel ---
+    def _build_funnel(subset: list) -> dict:
+        total = len(subset)
+        stage_counts = {s: 0 for s in _FUNNEL_ORDER}
+        executed = 0
+        for r in subset:
+            # final_action reflects what actually happened after the risk engine
+            stage = "evaluated"
+            if r["trader_decision"] == "BUY":
+                stage = "trader_buy_proposed"
+                if r["final_action"] == "BUY":
+                    stage = "risk_engine_approved"
+                    executed += 1
+                elif r["final_action"] == "REJECTED":
+                    # PM kept it as BUY but the deterministic risk engine vetoed it
+                    stage = "pm_approved"
+                # else final_action == "HOLD": PM itself overrode -> stays at trader_buy_proposed
+            stage_counts[stage] += 1
+        # Cumulative "reached at least this stage" counts (funnel-style, not just terminal stage)
+        cumulative = {}
+        remaining = total
+        for s in _FUNNEL_ORDER:
+            cumulative[s] = remaining
+            remaining -= stage_counts[s]
+        return {
+            "total_evaluated": total,
+            "reached_stage_counts": stage_counts,
+            "cumulative_reached": cumulative,
+            "conversion_pct": {
+                s: (round(cumulative[s] / total * 100, 1) if total else None) for s in _FUNNEL_ORDER
+            },
+            "executed_trades": executed,
+            "overall_conversion_pct": round(executed / total * 100, 2) if total else None,
+        }
+
+    overall_funnel = _build_funnel(rows)
+    by_symbol_funnel = {}
+    for sym in sorted({r["symbol"] for r in rows}):
+        by_symbol_funnel[sym] = _build_funnel([r for r in rows if r["symbol"] == sym])
+    # Symbols that basically never get past the trader's own judgment
+    dead_symbols = sorted(
+        by_symbol_funnel.items(),
+        key=lambda kv: kv[1]["conversion_pct"]["trader_buy_proposed"] or 0,
+    )
+    never_reaches_buy = [sym for sym, f in dead_symbols if (f["conversion_pct"]["trader_buy_proposed"] or 0) == 0]
+
+    # --- Near-miss analysis: single-reason HOLDs with a subsequently positive MFE ---
+    near_misses = []
+    for r in rows:
+        if r["trader_decision"] == "BUY":
+            continue
+        reason_count = (1 if r["primary_reason"] else 0) + len(r["secondary_reasons"])
+        if reason_count == 1 and r["mfe_pct"] is not None and r["mfe_pct"] > 0.5:
+            near_misses.append({
+                "symbol": r["symbol"],
+                "created_at": r["created_at"],
+                "sole_reason": r["primary_reason"],
+                "mfe_pct": r["mfe_pct"],
+                "mae_pct": r["mae_pct"],
+                "forward_60m_pct": r["forward_returns_pct"].get("+60m"),
+            })
+    near_misses.sort(key=lambda x: x["mfe_pct"], reverse=True)
+
+    # --- Stacking check: does missed-opportunity rate rise with reason count? ---
+    by_reason_count: dict[int, list] = {}
+    for r in rows:
+        if r["trader_decision"] == "BUY":
+            continue
+        reason_count = (1 if r["primary_reason"] else 0) + len(r["secondary_reasons"])
+        by_reason_count.setdefault(reason_count, []).append(r)
+    stacking = []
+    for count, group in sorted(by_reason_count.items()):
+        measured = [r for r in group if r["forward_returns_pct"].get("+60m") is not None]
+        missed = sum(1 for r in measured if r["forward_returns_pct"]["+60m"] > 0.5)
+        avoided = sum(1 for r in measured if r["forward_returns_pct"]["+60m"] < -0.5)
+        stacking.append({
+            "reason_count": count,
+            "sample_size": len(group),
+            "outcomes_measured": len(measured),
+            "missed_opportunity_rate": round(missed / len(measured), 2) if measured else None,
+            "avoided_drawdown_rate": round(avoided / len(measured), 2) if measured else None,
+        })
+
+    # --- Per-reason protectiveness: avg MAE avoided vs avg MFE missed ---
+    protectiveness = _rollup(rows, lambda r: r["primary_reason"])
+    for p in protectiveness:
+        mfe = p["avg_mfe_pct"] or 0
+        mae = p["avg_mae_pct"] or 0
+        # Positive score = mostly suppressing frequency (missing upside, not avoiding much
+        # downside); negative score = genuinely protective (avoiding real downside).
+        p["net_suppression_score"] = round(mfe + mae, 2) if (p["avg_mfe_pct"] is not None and p["avg_mae_pct"] is not None) else None
+    protectiveness.sort(key=lambda p: p["net_suppression_score"] if p["net_suppression_score"] is not None else -999, reverse=True)
+
+    # --- Overall trade-vs-hold rate straight from final_action ---
+    final_actions = {}
+    for r in rows:
+        fa = r["final_action"] or "UNKNOWN"
+        final_actions[fa] = final_actions.get(fa, 0) + 1
+
+    return {
+        "total_debates": len(rows),
+        "final_action_breakdown": final_actions,
+        "overall_funnel": overall_funnel,
+        "symbols_that_never_reach_buy_proposal": never_reaches_buy,
+        "by_symbol_funnel": by_symbol_funnel,
+        "near_miss_single_reason_positive_mfe": near_misses,
+        "stacking_by_reason_count": stacking,
+        "reason_protectiveness_ranked": protectiveness,
+        "_notes": {
+            "funnel_stages": "evaluated -> trader_buy_proposed -> pm_approved -> risk_engine_approved. "
+                              "There is no separate sequential fundamentals/technicals/volume gate in the "
+                              "actual pipeline — the Trader synthesizes all three holistically in one judgment "
+                              "call. primary_reason (from /diagnostics/summary) is the closest available proxy "
+                              "for 'which factor it led with', not a hard pass/fail stage.",
+            "net_suppression_score": "avg_mfe_pct + avg_mae_pct for that reason's HOLDs. Positive = mostly "
+                                      "missing upside without avoiding much downside (frequency-suppressing). "
+                                      "Negative = genuinely avoiding real drawdown (protective).",
+        },
+    }
