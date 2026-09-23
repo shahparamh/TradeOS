@@ -12,6 +12,8 @@ import Watchlist from '../components/Watchlist';
 import ChartPanel from '../components/ChartPanel';
 import AgentDetailDrawer from '../components/AgentDetailDrawer';
 import { NIFTY50_SYMBOLS } from '../utils/symbols';
+import { useMarket } from '../context/MarketContext';
+import { formatCurrency } from '../utils/currency';
 
 const MetricCard = ({ label, value, detail, detailPositive, icon }) => (
     <div className="card metric-card">
@@ -41,6 +43,8 @@ const getHeatColor = (pct) => {
 };
 
 const Dashboard = () => {
+    const { market } = useMarket();
+    const fmt = (amount, opts) => formatCurrency(amount, market, opts);
     const [positions, setPositions] = useState([]);
     const [trades, setTrades] = useState([]);
     const [leaderboard, setLeaderboard] = useState([]);
@@ -96,12 +100,12 @@ const Dashboard = () => {
             <header className="page-header">
                 <div>
                     <h1>Terminal Alpha</h1>
-                    <p className="subtitle">Live monitoring of NSE evaluation fleet</p>
+                    <p className="subtitle">Live monitoring of {market === 'US' ? 'US' : 'NSE'} evaluation fleet</p>
                 </div>
                 <div className="header-actions">
                     <div className="market-badge">
                         <div className="pulse-dot green"></div>
-                        NSE LIVE
+                        {market === 'US' ? 'US' : 'NSE'} LIVE
                     </div>
                 </div>
             </header>
@@ -110,13 +114,13 @@ const Dashboard = () => {
             <div className="metrics-row">
                 <MetricCard
                     label="Total Equity"
-                    value={`₹${totalEquity.toLocaleString('en-IN')}`}
+                    value={fmt(totalEquity)}
                     detail="System total across fleet"
                     icon={<DollarSign size={15} />}
                 />
                 <MetricCard
                     label="Net P&L"
-                    value={`${totalPnl >= 0 ? '+' : ''}₹${totalPnl.toLocaleString('en-IN')}`}
+                    value={`${totalPnl >= 0 ? '+' : ''}${fmt(totalPnl)}`}
                     detail={totalPnl >= 0 ? 'Profit realized' : 'Loss realized'}
                     detailPositive={totalPnl >= 0}
                     icon={<Activity size={15} />}
@@ -159,7 +163,7 @@ const Dashboard = () => {
                                     <span className="rank-avatar" style={{ background: agent.color }}>{agent.name[0]}</span>
                                     <span className="rank-name">{agent.name}</span>
                                     <span className={`rank-pnl mono ${agent.total_pnl >= 0 ? 'text-profit' : 'text-loss'}`}>
-                                        {agent.total_pnl >= 0 ? '+' : ''}₹{agent.total_pnl.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                                        {agent.total_pnl >= 0 ? '+' : ''}{fmt(agent.total_pnl, { maximumFractionDigits: 0, minimumFractionDigits: 0 })}
                                     </span>
                                 </button>
                             ))}
@@ -188,9 +192,9 @@ const Dashboard = () => {
                                         <td className="mono fw-bold">{(p.symbol || '').replace('.NS', '')}</td>
                                         <td>{p.agent_name || '—'}</td>
                                         <td className="mono">{p.quantity}</td>
-                                        <td className="mono num">₹{p.current_price?.toFixed(2) ?? '—'}</td>
+                                        <td className="mono num">{p.current_price != null ? fmt(p.current_price) : '—'}</td>
                                         <td className={`mono num ${p.unrealized_pnl >= 0 ? 'text-profit' : 'text-loss'}`}>
-                                            {p.unrealized_pnl >= 0 ? '+' : ''}₹{p.unrealized_pnl?.toFixed(2)}
+                                            {p.unrealized_pnl >= 0 ? '+' : ''}{fmt(p.unrealized_pnl)}
                                         </td>
                                     </tr>
                                 ))}
@@ -210,7 +214,7 @@ const Dashboard = () => {
                             const pct = q?.percent_change ?? null;
                             const colors = getHeatColor(pct);
                             return (
-                                <div key={sym} className="mini-heatmap-tile" style={{ background: colors.bg, borderColor: colors.border }} title={q ? `₹${q.price} (${pct.toFixed(2)}%)` : 'No data'}>
+                                <div key={sym} className="mini-heatmap-tile" style={{ background: colors.bg, borderColor: colors.border }} title={q ? `${fmt(q.price)} (${pct.toFixed(2)}%)` : 'No data'}>
                                     <span className="mht-symbol mono">{sym.replace('.NS', '')}</span>
                                     <span className="mht-pct mono">{pct == null ? '—' : `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`}</span>
                                 </div>
@@ -236,9 +240,9 @@ const Dashboard = () => {
                                 <div key={trade.id} className="activity-row">
                                     <span className={`activity-dot ${trade.pnl > 0 ? 'profit' : trade.pnl < 0 ? 'loss' : 'neutral'}`}></span>
                                     <div className="activity-text">
-                                        <span className="activity-primary">{trade.symbol?.replace('.NS', '')} · {trade.position_type} @ ₹{trade.entry_price}</span>
+                                        <span className="activity-primary">{trade.symbol?.replace('.NS', '')} · {trade.position_type} @ {fmt(trade.entry_price)}</span>
                                         <span className="activity-secondary">
-                                            {trade.pnl != null ? `${trade.pnl > 0 ? '+' : ''}₹${trade.pnl.toFixed(0)}` : 'Position open'}
+                                            {trade.pnl != null ? `${trade.pnl > 0 ? '+' : ''}${fmt(trade.pnl, { maximumFractionDigits: 0, minimumFractionDigits: 0 })}` : 'Position open'}
                                             {' · '}
                                             {new Date(trade.entry_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                         </span>

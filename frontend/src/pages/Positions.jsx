@@ -6,11 +6,14 @@ import {
 import api, { brokerAPI } from '../services/api';
 import CandlestickChart from '../components/CandlestickChart';
 import { toChartTime } from '../utils/chartTime';
+import { useMarket } from '../context/MarketContext';
+import { formatCurrency } from '../utils/currency';
 import toast from 'react-hot-toast';
 
 const PositionCard = ({ pos, onRefresh, onViewChart }) => {
     const pnl = pos.unrealized_pnl || 0;
     const isProfit = pnl >= 0;
+    const fmt = (amount, opts) => formatCurrency(amount, pos.market || 'IN', opts);
     const isOrphan = typeof pos.id === 'string' && pos.id.startsWith('orphan-');
     const invested = pos.entry_price * pos.quantity;
     const pnlPercent = invested > 0 ? ((pnl / invested) * 100).toFixed(2) : '0.00';
@@ -22,7 +25,7 @@ const PositionCard = ({ pos, onRefresh, onViewChart }) => {
             return;
         }
 
-        if (window.confirm(`Square off ${pos.symbol} at ₹${pos.current_price}?`)) {
+        if (window.confirm(`Square off ${pos.symbol} at ${fmt(pos.current_price)}?`)) {
             try {
                 const res = await brokerAPI.closePosition(pos.id);
                 toast.success(`✅ ${res.data.message}`);
@@ -57,7 +60,7 @@ const PositionCard = ({ pos, onRefresh, onViewChart }) => {
             </div>
 
             <div className="price-block">
-                <div className="current-price">₹{pos.current_price.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
+                <div className="current-price">{fmt(pos.current_price)}</div>
                 <div className={`pnl-badge ${isProfit ? 'profit' : 'loss'}`}>
                     {isProfit ? <TrendingUp size={13} /> : <TrendingDown size={13} />}
                     <span>{isProfit ? '+' : ''}{pnlPercent}%</span>
@@ -65,13 +68,13 @@ const PositionCard = ({ pos, onRefresh, onViewChart }) => {
             </div>
 
             <div className={`unrealized-pnl mono ${isProfit ? 'text-profit' : 'text-loss'}`}>
-                {isProfit ? '+' : ''}₹{Math.abs(pnl).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                {isProfit ? '+' : ''}{fmt(Math.abs(pnl))}
             </div>
 
             <div className="pos-details-grid">
                 <div className="detail-cell">
                     <span className="dc-label">Entry</span>
-                    <span className="dc-value mono">₹{pos.entry_price}</span>
+                    <span className="dc-value mono">{fmt(pos.entry_price)}</span>
                 </div>
                 <div className="detail-cell">
                     <span className="dc-label">Qty</span>
@@ -86,11 +89,11 @@ const PositionCard = ({ pos, onRefresh, onViewChart }) => {
             <div className="risk-row">
                 <div className="target-sl">
                     <Target size={13} color="var(--green-profit)" />
-                    <span>TGT ₹{pos.target_price}</span>
+                    <span>TGT {fmt(pos.target_price)}</span>
                 </div>
                 <div className="target-sl">
                     <ShieldAlert size={13} color="var(--red-loss)" />
-                    <span>SL ₹{pos.stop_loss}</span>
+                    <span>SL {fmt(pos.stop_loss)}</span>
                 </div>
             </div>
 
@@ -111,6 +114,8 @@ const PositionCard = ({ pos, onRefresh, onViewChart }) => {
 };
 
 const Positions = () => {
+    const { market } = useMarket();
+    const fmt = (amount, opts) => formatCurrency(amount, market, opts);
     const [positions, setPositions] = useState([]);
     const [loading, setLoading] = useState(true);
     const [lastUpdated, setLastUpdated] = useState(null);
@@ -148,7 +153,7 @@ const Positions = () => {
         else if (tf === '5y') { interval = '1d'; period = '5y'; }
 
         try {
-            const res = await api.get(`/market/candles/${symbol}?interval=${interval}&period=${period}`);
+            const res = await api.get(`/market/candles/${symbol}`, { params: { interval, period, market: selectedPosition?.market || market } });
             const formatted = res.data
                 .filter(c => c && c.open !== null && c.high !== null && c.low !== null && c.close !== null)
                 .map(c => {
@@ -181,7 +186,7 @@ const Positions = () => {
         fetchPositions();
         const interval = setInterval(fetchPositions, 10000); // Polling is now just a safety fallback, run it less often (10s)
         return () => clearInterval(interval);
-    }, []);
+    }, [market]);
 
     // Real-Time Live WebSocket Tick Connection
     useEffect(() => {
@@ -292,7 +297,7 @@ const Positions = () => {
                     <div className="summary-pill">
                         <span className="sp-label">Total Unrealized</span>
                         <span className={`sp-value mono ${totalUnrealized >= 0 ? 'text-profit' : 'text-loss'}`}>
-                            {totalUnrealized >= 0 ? '+' : ''}₹{Math.abs(totalUnrealized).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                            {totalUnrealized >= 0 ? '+' : ''}{fmt(Math.abs(totalUnrealized))}
                         </span>
                     </div>
                     <div className="summary-pill">

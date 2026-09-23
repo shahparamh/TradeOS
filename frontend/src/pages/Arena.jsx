@@ -3,16 +3,17 @@ import { Link } from 'react-router-dom';
 import { Skull, ArrowRight, RefreshCw, Siren, PlayCircle, Zap, Plus, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { arenaAPI } from '../services/api';
+import { useMarket } from '../context/MarketContext';
+import { formatCurrency } from '../utils/currency';
 
 const PROVIDER_OPTIONS = [
     { value: 'google', label: 'Google Gemini', defaultModel: 'gemini-3.1-flash-lite' },
     { value: 'groq', label: 'Groq', defaultModel: 'openai/gpt-oss-120b' },
-    { value: 'github', label: 'GitHub Models', defaultModel: 'gpt-4o' },
-    { value: 'deepseek', label: 'DeepSeek', defaultModel: 'deepseek-reasoning' },
     { value: 'ollama', label: 'Local Ollama', defaultModel: 'llama3.2' },
 ];
 
 const CreateGameModal = ({ onClose, onCreated }) => {
+    const { market, meta } = useMarket();
     const [name, setName] = useState('');
     const [provider, setProvider] = useState(PROVIDER_OPTIONS[0].value);
     const [modelName, setModelName] = useState(PROVIDER_OPTIONS[0].defaultModel);
@@ -42,8 +43,9 @@ const CreateGameModal = ({ onClose, onCreated }) => {
                 model_name: modelName.trim(),
                 starting_capital: Number(startingCapital) || 2000,
                 death_threshold: deathThreshold === '' ? null : Number(deathThreshold),
+                market,
             });
-            toast.success(`"${name.trim()}" entered the Survival Arena.`);
+            toast.success(`"${name.trim()}" entered the Survival Arena (${meta.label}).`);
             onCreated();
             onClose();
         } catch (err) {
@@ -98,7 +100,7 @@ const CreateGameModal = ({ onClose, onCreated }) => {
 
                 <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
                     <p style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                        Drop a new AI agent into the arena with its own paper balance. It trades autonomously until it doubles down or drops below its death line.
+                        Drop a new AI agent into the {meta.label} arena with its own paper balance. It trades autonomously until it doubles down or drops below its death line.
                     </p>
 
                     <div>
@@ -121,11 +123,11 @@ const CreateGameModal = ({ onClose, onCreated }) => {
 
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                         <div>
-                            <label style={labelStyle}>Starting Capital (₹)</label>
+                            <label style={labelStyle}>Starting Capital ({meta.currencySymbol})</label>
                             <input style={inputStyle} type="number" min={100} step={100} value={startingCapital} onChange={(e) => setStartingCapital(e.target.value)} required />
                         </div>
                         <div>
-                            <label style={labelStyle}>Death Line (₹, optional)</label>
+                            <label style={labelStyle}>Death Line ({meta.currencySymbol}, optional)</label>
                             <input style={inputStyle} type="number" min={0} step={50} value={deathThreshold} onChange={(e) => setDeathThreshold(e.target.value)} placeholder="10% of capital" />
                         </div>
                     </div>
@@ -154,8 +156,6 @@ const CreateGameModal = ({ onClose, onCreated }) => {
 const PROVIDER_COLORS = {
     google: 'var(--color-gemini)',
     groq: 'var(--color-groq)',
-    github: 'var(--color-github)',
-    deepseek: 'var(--color-claude)',
     ollama: 'var(--color-chatgpt)',
 };
 
@@ -165,6 +165,7 @@ const AgentZeroCard = ({ agent, rank, onToggle, togglingId }) => {
     const isPaused = agent.is_active === false;
     const isToggling = togglingId === agent.id;
     const avatarColor = isDead ? 'var(--text-muted)' : (PROVIDER_COLORS[agent.provider] || 'var(--accent-blue)');
+    const fmt = (amount, opts) => formatCurrency(amount, agent.market || 'IN', opts);
 
     return (
         <Link to={`/arena/${agent.id}`} className={`agent-card card arena-card ${isDead ? 'dead' : ''} ${isPaused ? 'paused' : ''}`} style={{ textDecoration: 'none', position: 'relative' }}>
@@ -186,7 +187,7 @@ const AgentZeroCard = ({ agent, rank, onToggle, togglingId }) => {
             <div className="ac-stats">
                 <div className="ac-stat">
                     <span className="as-label">Equity</span>
-                    <span className="as-value mono">₹{agent.equity.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+                    <span className="as-value mono">{fmt(agent.equity, { maximumFractionDigits: 0, minimumFractionDigits: 0 })}</span>
                 </div>
                 <div className="ac-stat">
                     <span className="as-label">Return</span>
@@ -200,7 +201,7 @@ const AgentZeroCard = ({ agent, rank, onToggle, togglingId }) => {
                 </div>
                 <div className="ac-stat">
                     <span className="as-label">Death Line</span>
-                    <span className="as-value mono">₹{agent.death_threshold?.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+                    <span className="as-value mono">{agent.death_threshold != null ? fmt(agent.death_threshold, { maximumFractionDigits: 0, minimumFractionDigits: 0 }) : '—'}</span>
                 </div>
             </div>
 
@@ -232,6 +233,8 @@ const AgentZeroCard = ({ agent, rank, onToggle, togglingId }) => {
 };
 
 const Arena = () => {
+    const { market } = useMarket();
+    const fmt = (amount, opts) => formatCurrency(amount, market, opts);
     const [agents, setAgents] = useState([]);
     const [status, setStatus] = useState({ emergency_stop: false });
     const [loading, setLoading] = useState(true);
@@ -253,7 +256,7 @@ const Arena = () => {
         fetchAll();
         const interval = setInterval(fetchAll, 15000);
         return () => clearInterval(interval);
-    }, []);
+    }, [market]);
 
     const handleToggleAgent = async (agent) => {
         setTogglingId(agent.id);
@@ -310,12 +313,12 @@ const Arena = () => {
                 <div className="fleet-summary">
                     <div className="fs-item">
                         <span className="fs-label">Total Capital</span>
-                        <span className="fs-value mono">₹{totalCapital.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+                        <span className="fs-value mono">{fmt(totalCapital, { maximumFractionDigits: 0, minimumFractionDigits: 0 })}</span>
                     </div>
                     <div className="fs-item">
                         <span className="fs-label">Total P&L</span>
                         <span className={`fs-value ${totalPnl >= 0 ? 'text-profit' : 'text-loss'}`}>
-                            {totalPnl >= 0 ? '+' : ''}₹{totalPnl.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                            {totalPnl >= 0 ? '+' : ''}{fmt(totalPnl, { maximumFractionDigits: 0, minimumFractionDigits: 0 })}
                         </span>
                     </div>
                     <div className="fs-item">

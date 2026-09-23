@@ -11,12 +11,15 @@ const api = axios.create({
     timeout: 30000,
 });
 
-// Interceptor to inject JWT token automatically
+// Interceptor to inject JWT token and the selected market automatically. Individual calls
+// can still override `market` by passing it explicitly in their own params.
 api.interceptors.request.use((config) => {
     const token = localStorage.getItem('tradeos_token');
     if (token) {
         config.headers.Authorization = `Bearer ${token}`;
     }
+    const selectedMarket = localStorage.getItem('tradeos_market') === 'US' ? 'US' : 'IN';
+    config.params = { market: selectedMarket, ...config.params };
     return config;
 }, (error) => {
     return Promise.reject(error);
@@ -49,6 +52,7 @@ export const marketAPI = {
     getMacroNews: () => api.get('/market/news/macro'),
     getHeatmap: () => api.get('/market/heatmap'),
     getWatchlist: () => api.get('/market/watchlist'),
+    getStatus: () => api.get('/market/status'),
 };
 
 export const agentAPI = {

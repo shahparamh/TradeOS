@@ -2,13 +2,12 @@ import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Skull, BarChart3, Clock, MessageSquare, ChevronDown, ChevronUp } from 'lucide-react';
 import { arenaAPI } from '../services/api';
+import { formatCurrency } from '../utils/currency';
 
 // Same per-provider identity color convention used on the Arena leaderboard and Fleet dashboard.
 const PROVIDER_COLORS = {
     google: 'var(--color-gemini)',
     groq: 'var(--color-groq)',
-    github: 'var(--color-github)',
-    deepseek: 'var(--color-claude)',
     ollama: 'var(--color-chatgpt)',
 };
 
@@ -128,6 +127,8 @@ const ArenaAgentDetail = () => {
     if (!agent) return <div className="page-loading"><span>Agent not found.</span></div>;
 
     const stats = agent.stats || {};
+    const agentMarket = agent.market || 'IN';
+    const fmt = (amount, opts) => formatCurrency(amount, agentMarket, opts);
     const isDead = agent.status === 'Dead';
     const avatarColor = isDead ? 'var(--text-muted)' : (PROVIDER_COLORS[agent.provider] || 'var(--accent-blue)');
 
@@ -157,7 +158,7 @@ const ArenaAgentDetail = () => {
                 <div className="aph-kpis">
                     <div className="kpi">
                         <span className="kpi-label">Equity</span>
-                        <span className="kpi-value mono">₹{agent.equity.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+                        <span className="kpi-value mono">{fmt(agent.equity, { maximumFractionDigits: 0, minimumFractionDigits: 0 })}</span>
                     </div>
                     <div className="kpi">
                         <span className="kpi-label">Return</span>
@@ -171,7 +172,7 @@ const ArenaAgentDetail = () => {
                     </div>
                     <div className="kpi">
                         <span className="kpi-label">Death Line</span>
-                        <span className="kpi-value mono">₹{agent.death_threshold?.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+                        <span className="kpi-value mono">{agent.death_threshold != null ? fmt(agent.death_threshold, { maximumFractionDigits: 0, minimumFractionDigits: 0 }) : '—'}</span>
                     </div>
                 </div>
             </div>
@@ -183,7 +184,7 @@ const ArenaAgentDetail = () => {
                         <div className="perf-grid">
                             <div className="perf-item">
                                 <span className="pi-label">Starting Capital</span>
-                                <span className="pi-value mono">₹{agent.starting_capital?.toLocaleString('en-IN')}</span>
+                                <span className="pi-value mono">{agent.starting_capital != null ? fmt(agent.starting_capital) : '—'}</span>
                             </div>
                             <div className="perf-item">
                                 <span className="pi-label">Open Positions</span>
@@ -195,11 +196,11 @@ const ArenaAgentDetail = () => {
                             </div>
                             <div className="perf-item">
                                 <span className="pi-label">Best Trade</span>
-                                <span className="pi-value text-profit">+₹{stats.best_trade?.toFixed(2) || '0.00'}</span>
+                                <span className="pi-value text-profit">+{stats.best_trade != null ? fmt(stats.best_trade) : fmt(0)}</span>
                             </div>
                             <div className="perf-item">
                                 <span className="pi-label">Worst Trade</span>
-                                <span className="pi-value text-loss">₹{stats.worst_trade?.toFixed(2) || '0.00'}</span>
+                                <span className="pi-value text-loss">{stats.worst_trade != null ? fmt(stats.worst_trade) : fmt(0)}</span>
                             </div>
                         </div>
                     </div>
@@ -217,10 +218,10 @@ const ArenaAgentDetail = () => {
                                     {agent.trades.slice(0, 15).map(t => (
                                         <tr key={t.id}>
                                             <td className="mono fw-bold">{(t.symbol || '').replace('.NS', '')}</td>
-                                            <td className="mono">₹{t.entry_price}</td>
-                                            <td className="mono">{t.exit_price ? `₹${t.exit_price}` : '—'}</td>
+                                            <td className="mono">{formatCurrency(t.entry_price, t.market || agentMarket)}</td>
+                                            <td className="mono">{t.exit_price ? formatCurrency(t.exit_price, t.market || agentMarket) : '—'}</td>
                                             <td className={`mono fw-bold ${t.pnl > 0 ? 'text-profit' : t.pnl < 0 ? 'text-loss' : ''}`}>
-                                                {t.pnl != null ? `${t.pnl > 0 ? '+' : ''}₹${t.pnl.toFixed(2)}` : 'OPEN'}
+                                                {t.pnl != null ? `${t.pnl > 0 ? '+' : ''}${formatCurrency(t.pnl, t.market || agentMarket)}` : 'OPEN'}
                                             </td>
                                             <td><span className={`status-pill ${t.status?.toLowerCase().replace('_', '-')}`}>{t.status}</span></td>
                                         </tr>

@@ -8,11 +8,12 @@ def seed_agents():
         # Create tables
         Base.metadata.create_all(bind=engine)
 
-        # Purge existing openrouter agents and their dependencies
-        openrouter_agents = db.query(Agent).filter(Agent.provider == "openrouter").all()
-        if openrouter_agents:
+        # Purge existing openrouter/github/deepseek agents and their dependencies —
+        # these providers have been removed from the app entirely.
+        purged_agents = db.query(Agent).filter(Agent.provider.in_(("openrouter", "github", "deepseek"))).all()
+        if purged_agents:
             from database.models import Trade, Position, DailyPerformance, AIResponse, AgentDailyStrategy
-            for agent in openrouter_agents:
+            for agent in purged_agents:
                 db.query(Position).filter(Position.agent_id == agent.id).delete()
                 db.query(Trade).filter(Trade.agent_id == agent.id).delete()
                 db.query(DailyPerformance).filter(DailyPerformance.agent_id == agent.id).delete()
@@ -29,8 +30,6 @@ def seed_agents():
             agents_to_add.append(Agent(name="Gemini", provider="google", model_name=settings.GEMINI_MODEL, cash_balance=settings.INITIAL_CAPITAL))
         if "Groq-Llama" not in existing_agents:
             agents_to_add.append(Agent(name="Groq-Llama", provider="groq", model_name=settings.GROQ_MODEL, cash_balance=settings.INITIAL_CAPITAL))
-        if "GitHub Model" not in existing_agents:
-            agents_to_add.append(Agent(name="GitHub Model", provider="github", model_name=settings.GITHUB_MODEL, cash_balance=settings.INITIAL_CAPITAL))
         if "Local-Ollama" not in existing_agents:
             agents_to_add.append(Agent(name="Local-Ollama", provider="ollama", model_name=settings.OLLAMA_MODEL, cash_balance=settings.INITIAL_CAPITAL))
             

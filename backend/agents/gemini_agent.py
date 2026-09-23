@@ -28,10 +28,11 @@ async def query_gemini(payload: str, system_prompt: str = SYSTEM_PROMPT) -> dict
             "confidence": 0,
             "reasoning": "Gemini API Keys exhausted.",
             "is_valid": False,
+            "error_type": "provider_error",
             "latency_ms": 0,
             "raw_response": "Missing or exhausted API Keys",
         }
-        
+
     start_time = time.time()
 
     try:
@@ -43,26 +44,39 @@ async def query_gemini(payload: str, system_prompt: str = SYSTEM_PROMPT) -> dict
 
         # Log usage BEFORE making the call (optimistic tracking)
         api_key_manager.record_usage("gemini", api_key)
-        
+
         model = genai.GenerativeModel(
             model_name=settings.GEMINI_MODEL,
             system_instruction=system_prompt,
         )
 
-        response = model.generate_content(
-            payload,
-            generation_config=genai.types.GenerationConfig(
-                temperature=0.3,
-                max_output_tokens=1000,
-            ),
+        generation_config = genai.types.GenerationConfig(
+            temperature=0.3,
+            max_output_tokens=1000,
+            # Guaranteed-JSON mode -- reduces (does not eliminate; the model can still emit
+            # a schema-invalid or truncated body) the parse failures downstream logic must
+            # distinguish from genuine reasoned decisions.
+            response_mime_type="application/json",
         )
 
-        raw_text = response.text
+        raw_text = None
+        parsed = None
+        # Up to 2 attempts: retry once, only on a parse failure, with an explicit nudge.
+        # This is a model-interface reliability measure, not a trading-policy change --
+        # it never alters what counts as BUY/HOLD, only gives malformed output one more
+        # chance to come back well-formed before we tag it as a parse error.
+        for attempt in range(2):
+            response = model.generate_content(payload, generation_config=generation_config)
+            raw_text = response.text
+            parsed = parse_ai_response(raw_text)
+            if parsed.get("error_type") != "parse_error":
+                break
+            payload = f"{payload}\n\n(Your previous response was not valid JSON. Respond with ONLY the JSON object, no other text.)"
+
         latency_ms = int((time.time() - start_time) * 1000)
-        
+
         logger.info(f"Gemini responded in {latency_ms}ms")
 
-        parsed = parse_ai_response(raw_text)
         parsed["agent"] = "Gemini"
         parsed["provider"] = "google"
         parsed["latency_ms"] = latency_ms
@@ -102,6 +116,7 @@ async def query_gemini(payload: str, system_prompt: str = SYSTEM_PROMPT) -> dict
         "confidence": 0,
         "reasoning": "All Gemini API keys are exhausted or offline.",
         "is_valid": False,
+        "error_type": "provider_error",
         "latency_ms": latency_ms,
         "raw_response": "All keys failed.",
     }

@@ -29,4 +29,9 @@ MARKET_OPEN = "09:15"
 MARKET_CLOSE = "15:30"
 
 # AI Agent names
-AGENT_NAMES = ["Gemini", "Groq-Llama", "GitHub Model", "Local-Ollama"]
+AGENT_NAMES = ["Gemini", "Groq-Llama", "Local-Ollama"]
+
+# US watchlist and per-market watchlist map — kept in market_data/market_config.py to avoid
+# a circular import (market_config imports WATCHLIST from here). Re-exported here too for
+# convenience: `from utils.constants import WATCHLISTS`.
+from market_data.market_config import WATCHLISTS, US_WATCHLIST  # noqa: E402,F401

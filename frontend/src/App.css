@@ -75,6 +75,22 @@
 .topbar-session .status-dot.closed { background: var(--text-muted); }
 .topbar-user { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 
+.market-switch {
+    display: flex; align-items: center; gap: 2px; flex-shrink: 0;
+    background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; padding: 2px;
+}
+.market-switch-btn {
+    display: flex; align-items: center; gap: 5px; padding: 3px 8px; border: none; border-radius: 3px;
+    background: transparent; color: var(--text-muted); font-size: 11px; font-weight: 600;
+    letter-spacing: 0.4px; cursor: pointer; transition: background 0.15s, color 0.15s;
+}
+.market-switch-btn:hover { color: var(--text-primary); }
+.market-switch-btn.active { background: var(--accent-blue); color: #fff; }
+.market-switch-flag { font-size: 13px; line-height: 1; }
+@media (max-width: 900px) {
+    .market-switch-code { display: none; }
+}
+
 /* Sidebar */
 .sidebar { width: 200px; height: calc(100vh - 48px); position: fixed; left: 0; top: 48px; background: var(--bg-secondary); border-right: 1px solid var(--border-color); display: flex; flex-direction: column; padding: var(--space-3) var(--space-2); z-index: 100; transition: width 0.18s ease; }
 .sidebar.collapsed { width: 56px; }

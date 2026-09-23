@@ -22,6 +22,7 @@ class Agent(Base):
     is_dead = Column(Boolean, default=False)
     died_at = Column(DateTime, nullable=True)
     trading_paused = Column(Boolean, default=False)        # per-agent emergency-stop flag
+    market = Column(String(10), default="IN")              # "IN" | "US" — which market this agent trades
 
     trades = relationship("Trade", back_populates="agent")
     positions = relationship("Position", back_populates="agent")
@@ -47,6 +48,7 @@ class Trade(Base):
     pnl = Column(Float, nullable=True)
     status = Column(String(20)) # OPEN, CLOSED, SL_HIT, TARGET_HIT, SQUARED_OFF
     confidence = Column(Integer)
+    market = Column(String(10), default="IN")   # "IN" | "US"
     entry_time = Column(DateTime, default=datetime.utcnow)
     exit_time = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -69,6 +71,7 @@ class Position(Base):
     stop_loss = Column(Float)
     target_price = Column(Float)
     unrealized_pnl = Column(Float, default=0.0)
+    market = Column(String(10), default="IN")   # "IN" | "US"
     opened_at = Column(DateTime, default=datetime.utcnow)
 
     agent = relationship("Agent", back_populates="positions")
@@ -97,6 +100,7 @@ class MarketSnapshot(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     symbol = Column(String(30))
+    market = Column(String(10), default="IN")   # "IN" | "US"
     open = Column(Float)
     high = Column(Float)
     low = Column(Float)
@@ -198,6 +202,7 @@ class ArenaDebateLog(Base):
     portfolio_manager_decision = Column(Text)        # JSON decision contract
     risk_engine_result = Column(Text)       # JSON: {approved, reason, quantity}
     final_action = Column(String(20))       # BUY | SELL | HOLD | REJECTED
+    market = Column(String(10), default="IN")   # "IN" | "US"
     created_at = Column(DateTime, default=datetime.utcnow)
     # Raw numeric indicators (volume_ratio, rsi, macd, ema20/50, vwap, atr, ...) as fed into
     # the analyst prompt — the analyst reports above only keep the LLM's PROSE about these

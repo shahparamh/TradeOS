@@ -9,6 +9,9 @@ from scanner.technical_engine import calculate_all_indicators, generate_indicato
 from broker.position_monitor import PositionMonitor
 from utils.logger import setup_logger
 from utils.constants import WATCHLIST, ARENA_WATCHLIST
+from market_data.market_config import get_watchlist, MARKET_META, normalize_market
+from market_data.factory import get_provider
+from market_data.base import MarketDataError
 from datetime import datetime, date
 import asyncio
 
@@ -98,8 +101,22 @@ class TradingScheduler:
             self.run_arena_cycle,
             CronTrigger(day_of_week="mon-fri", hour="9-15", minute="5-59/10", timezone="Asia/Kolkata"),
             id="arena_loop",
-            name="Survival Arena Cycle",
-            replace_existing=True
+            name="Survival Arena Cycle (India)",
+            replace_existing=True,
+            kwargs={"market": "IN"},
+        )
+
+        # 2c. Survival Arena Cycle — US market, regular session only (9:30 AM - 4:00 PM ET).
+        # Runs on the US exchange's own timezone/hours rather than IST — never assume NSE
+        # hours apply here. Offset 5 minutes into each 10-minute window for the same
+        # rate-limiter/provider-contention reason as the IN cycle above.
+        self.scheduler.add_job(
+            self.run_arena_cycle,
+            CronTrigger(day_of_week="mon-fri", hour="9-15", minute="5-59/10", timezone="America/New_York"),
+            id="arena_loop_us",
+            name="Survival Arena Cycle (US)",
+            replace_existing=True,
+            kwargs={"market": "US"},
         )
 
         # 3. Position Monitor - Every 2 mins
@@ -155,22 +172,28 @@ class TradingScheduler:
             logger.error(f"[Keep-Alive] Self-ping failed: {e}")
 
     async def run_monitor_cycle(self, ignore_hours: bool = False):
-        """Runs the position monitor to check for SL/TP hits."""
+        """Runs the position monitor to check for SL/TP hits. Skips only when NEITHER
+        market is currently in its regular session — IN and US run on independent
+        timezones/hours, so an IN-hours gate alone would starve US position monitoring."""
         if not ignore_hours:
             from datetime import datetime, timezone, timedelta
             from utils.market_calendar import is_market_holiday
             ist = timezone(timedelta(hours=5, minutes=30))
             now = datetime.now(ist)
-            
-            # 1. Market Closed Check (Weekend or Holiday)
-            if is_market_holiday(now.date()):
-                return
-                
-            # 2. Market Hours Check (9:15 AM to 3:30 PM)
-            market_start = now.replace(hour=9, minute=15, second=0, microsecond=0)
-            market_end = now.replace(hour=15, minute=30, second=0, microsecond=0)
-            
-            if now < market_start or now > market_end:
+
+            in_open = False
+            if not is_market_holiday(now.date()):
+                market_start = now.replace(hour=9, minute=15, second=0, microsecond=0)
+                market_end = now.replace(hour=15, minute=30, second=0, microsecond=0)
+                in_open = market_start <= now <= market_end
+
+            us_open = False
+            try:
+                us_open = get_provider("US").get_market_status().get("is_open", False)
+            except MarketDataError:
+                pass
+
+            if not in_open and not us_open:
                 return
 
         db = SessionLocal()
@@ -401,24 +424,39 @@ class TradingScheduler:
             self.is_running_cycle = False
             logger.info("=== TRADING CYCLE END ===")
 
-    async def run_arena_cycle(self, ignore_hours: bool = False):
-        """Survival Arena pipeline: scans ARENA_WATCHLIST and runs the multi-role debate
-        pipeline for every non-dead SURVIVAL agent. Mirrors run_trading_cycle's structure
-        but is intentionally simpler — cash equity only, no F&O/derivatives context."""
-        from datetime import datetime, timezone, timedelta
+    async def run_arena_cycle(self, ignore_hours: bool = False, market: str = "IN"):
+        """Survival Arena pipeline: scans the given market's watchlist and runs the
+        multi-role debate pipeline for every non-dead SURVIVAL agent in that market.
+        Mirrors run_trading_cycle's structure but is intentionally simpler — cash equity
+        only, no F&O/derivatives context. `market` selects both the watchlist/provider AND
+        which agents participate (agents are scoped to one market via Agent.market)."""
         from database.models import Agent, SystemRule
+        import pytz
 
-        ist = timezone(timedelta(hours=5, minutes=30))
-        now = datetime.now(ist)
+        market = normalize_market(market)
+        meta = MARKET_META[market]
+        tz = pytz.timezone(meta["timezone"])
+        now = datetime.now(tz)
 
         if not ignore_hours:
-            from utils.market_calendar import is_market_holiday
-            if is_market_holiday(now.date()):
-                return
-            market_start = now.replace(hour=9, minute=15, second=0, microsecond=0)
-            market_end = now.replace(hour=15, minute=15, second=0, microsecond=0)
-            if now < market_start or now > market_end:
-                return
+            if market == "IN":
+                from utils.market_calendar import is_market_holiday
+                if is_market_holiday(now.date()):
+                    return
+                market_start = now.replace(hour=9, minute=15, second=0, microsecond=0)
+                market_end = now.replace(hour=15, minute=15, second=0, microsecond=0)
+                if now < market_start or now > market_end or now.weekday() >= 5:
+                    return
+            else:
+                # US regular session only (9:30 AM - 4:00 PM ET, Mon-Fri). No pre-market/
+                # after-hours candles get fed into this strategy.
+                try:
+                    status_ = get_provider("US").get_market_status()
+                    if not status_.get("is_open"):
+                        return
+                except MarketDataError:
+                    logger.warning("[Arena/US] Could not check Alpaca market clock; skipping cycle.")
+                    return
 
         db = SessionLocal()
         try:
@@ -431,11 +469,12 @@ class TradingScheduler:
                 Agent.mode == "SURVIVAL",
                 Agent.is_active == True,
                 Agent.is_dead == False,
+                Agent.market == market,
             ).all()
             if not agents:
                 return
 
-            market_context = await aggregate_market_context()
+            market_context = await aggregate_market_context() if market == "IN" else {}
 
             from broker.virtual_broker import VirtualBroker
             from broker.survival_risk_manager import SurvivalRiskManager
@@ -444,10 +483,13 @@ class TradingScheduler:
             from config import settings
             broker = VirtualBroker(settings)
 
-            # Batch-fetch intraday candles for the whole arena watchlist in one yfinance call.
-            batch_candles = await asyncio.to_thread(fetch_intraday_candles_batch, tuple(ARENA_WATCHLIST), "5m", "5d")
+            watchlist = get_watchlist(market)
+            provider = get_provider(market)
 
-            for symbol in ARENA_WATCHLIST:
+            # Batch-fetch intraday candles for the whole arena watchlist in one provider call.
+            batch_candles = await asyncio.to_thread(provider.get_intraday_candles_batch, tuple(watchlist), "5m", "5d")
+
+            for symbol in watchlist:
                 local_db = SessionLocal()
                 try:
                     candles_df = batch_candles.get(symbol)
@@ -455,11 +497,18 @@ class TradingScheduler:
                         continue
                     indicators = generate_indicator_summary(calculate_all_indicators(candles_df), symbol)
 
-                    from data.fundamentals_fetcher import fetch_yf_fundamentals
-                    fundamentals = await asyncio.to_thread(fetch_yf_fundamentals, symbol)
+                    # News/fundamentals fetchers are Indian-market-specific (NSE company map,
+                    # yfinance) — not wired up for US symbols yet. Feed the analyst team a
+                    # minimal, explicitly-labeled stub instead of India-shaped data.
+                    if market == "IN":
+                        from data.fundamentals_fetcher import fetch_yf_fundamentals
+                        fundamentals = await asyncio.to_thread(fetch_yf_fundamentals, symbol)
 
-                    from data.news_fetcher import fetch_all_news_for_stock
-                    news_payload = await asyncio.to_thread(fetch_all_news_for_stock, symbol) or []
+                        from data.news_fetcher import fetch_all_news_for_stock
+                        news_payload = await asyncio.to_thread(fetch_all_news_for_stock, symbol) or []
+                    else:
+                        fundamentals = {"symbol": symbol, "note": "US fundamentals not yet integrated"}
+                        news_payload = []
 
                     is_valid, validation_error = _validate_data_integrity(symbol, indicators, fundamentals)
                     if not is_valid:
@@ -468,6 +517,7 @@ class TradingScheduler:
 
                     opportunity = {
                         "symbol": symbol,
+                        "market": market,
                         "indicators": indicators,
                         "fundamentals": fundamentals,
                         "news": news_payload,
@@ -600,7 +650,6 @@ class TradingScheduler:
             # Importing agent clients dynamically to avoid circular references
             from agents.gemini_agent import query_gemini
             from agents.groq_agent import query_groq
-            from agents.github_agent import query_github
             from agents.ollama_agent import query_ollama
             
             for symbol in symbols:
@@ -640,11 +689,6 @@ class TradingScheduler:
                             decision_data = await query_gemini(payload_str, system_prompt=PRE_MARKET_SYSTEM_PROMPT)
                         elif agent.provider == "groq":
                             decision_data = await query_groq(payload_str, system_prompt=PRE_MARKET_SYSTEM_PROMPT)
-                        elif agent.provider == "github":
-                            decision_data = await query_github(payload_str, system_prompt=PRE_MARKET_SYSTEM_PROMPT)
-                        elif agent.provider == "deepseek":
-                            from agents.deepseek_agent import query_deepseek
-                            decision_data = await query_deepseek(payload_str, system_prompt=PRE_MARKET_SYSTEM_PROMPT)
                         elif agent.provider == "ollama":
                             import os
                             if os.getenv("RENDER"):

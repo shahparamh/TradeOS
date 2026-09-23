@@ -26,6 +26,7 @@ def get_all_agents(db: Session = Depends(get_db)):
             "is_active": agent.is_active,
             "trades_count": len(all_trades),
             "win_rate": round(len(wins) / len(closed) * 100, 1) if closed else 0,
+            "market": getattr(agent, "market", "IN") or "IN",
         })
     return result
 
@@ -51,6 +52,7 @@ def get_agent_detail(agent_id: int, db: Session = Depends(get_db)):
         "cash_balance": float(agent.cash_balance or 0),
         "total_pnl": float(agent.total_pnl or 0),
         "is_active": agent.is_active,
+        "market": getattr(agent, "market", "IN") or "IN",
         "created_at": agent.created_at.isoformat() if agent.created_at else None,
         "stats": {
             "total_trades": len(all_trades),
@@ -83,6 +85,7 @@ def get_agent_trades(agent_id: int, db: Session = Depends(get_db)):
         "confidence": t.confidence,
         "entry_time": t.entry_time.isoformat() if t.entry_time else None,
         "exit_time": t.exit_time.isoformat() if t.exit_time else None,
+        "market": getattr(t, "market", "IN") or "IN",
     } for t in trades]
 
 

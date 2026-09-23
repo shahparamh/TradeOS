@@ -2,16 +2,19 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Users, ArrowRight, RefreshCw } from 'lucide-react';
 import { agentAPI } from '../services/api';
+import { useMarket } from '../context/MarketContext';
+import { formatCurrency } from '../utils/currency';
 
 const AgentCard = ({ agent, rank }) => {
     const isProfit = agent.total_pnl >= 0;
+    const agentMarket = agent.market || 'IN';
+    const fmt = (amount, opts) => formatCurrency(amount, agentMarket, opts);
     const colorMap = {
         'gemini': 'var(--color-gemini)',
         'groq': 'var(--color-groq)',
         'chatgpt': 'var(--color-chatgpt)',
         'claude': 'var(--color-claude)',
         'grok': 'var(--color-grok)',
-        'github': 'var(--color-github)',
     };
     const colorKey = agent.name.toLowerCase().split('-')[0];
     const color = colorMap[colorKey] || 'var(--accent-blue)';
@@ -36,12 +39,12 @@ const AgentCard = ({ agent, rank }) => {
             <div className="ac-stats">
                 <div className="ac-stat">
                     <span className="as-label">Balance</span>
-                    <span className="as-value mono">₹{agent.cash_balance.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+                    <span className="as-value mono">{fmt(agent.cash_balance, { maximumFractionDigits: 0, minimumFractionDigits: 0 })}</span>
                 </div>
                 <div className="ac-stat">
                     <span className="as-label">Net PnL</span>
                     <span className={`as-value mono ${isProfit ? 'text-profit' : 'text-loss'}`}>
-                        {isProfit ? '+' : ''}₹{agent.total_pnl.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        {isProfit ? '+' : ''}{fmt(agent.total_pnl)}
                     </span>
                 </div>
                 <div className="ac-stat">
@@ -70,6 +73,8 @@ const AgentCard = ({ agent, rank }) => {
 };
 
 const Agents = () => {
+    const { market } = useMarket();
+    const fmt = (amount, opts) => formatCurrency(amount, market, opts);
     const [agents, setAgents] = useState([]);
     const [loading, setLoading] = useState(true);
 
@@ -85,8 +90,11 @@ const Agents = () => {
         return () => clearInterval(interval);
     }, []);
 
-    const totalPnl = agents.reduce((acc, a) => acc + a.total_pnl, 0);
-    const totalTrades = agents.reduce((acc, a) => acc + a.trades_count, 0);
+    // Fleet agents aren't market-filtered server-side yet — filter client-side so an IN
+    // agent's balance never gets summed/displayed next to a US agent's.
+    const marketAgents = agents.filter(a => (a.market || 'IN') === market);
+    const totalPnl = marketAgents.reduce((acc, a) => acc + a.total_pnl, 0);
+    const totalTrades = marketAgents.reduce((acc, a) => acc + a.trades_count, 0);
 
     return (
         <div className="agents-page animate-fade-in">
@@ -99,7 +107,7 @@ const Agents = () => {
                     <div className="fs-item">
                         <span className="fs-label">Fleet PnL</span>
                         <span className={`fs-value ${totalPnl >= 0 ? 'text-profit' : 'text-loss'}`}>
-                            {totalPnl >= 0 ? '+' : ''}₹{totalPnl.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                            {totalPnl >= 0 ? '+' : ''}{fmt(totalPnl)}
                         </span>
                     </div>
                     <div className="fs-item">
@@ -108,7 +116,7 @@ const Agents = () => {
                     </div>
                     <div className="fs-item">
                         <span className="fs-label">Active Agents</span>
-                        <span className="fs-value text-profit">{agents.filter(a => a.is_active).length}</span>
+                        <span className="fs-value text-profit">{marketAgents.filter(a => a.is_active).length}</span>
                     </div>
                 </div>
             </header>
@@ -118,7 +126,7 @@ const Agents = () => {
                     <RefreshCw size={24} className="spin" />
                     <span>Loading agents...</span>
                 </div>
-            ) : agents.length === 0 ? (
+            ) : marketAgents.length === 0 ? (
                 <div className="empty-state-full card">
                     <Users size={56} color="var(--text-muted)" strokeWidth={1.5} />
                     <h2>No Agents Found</h2>
@@ -126,7 +134,7 @@ const Agents = () => {
                 </div>
             ) : (
                 <div className="agents-grid">
-                    {agents.map((agent, i) => (
+                    {marketAgents.map((agent, i) => (
                         <AgentCard key={agent.id} agent={agent} rank={i + 1} />
                     ))}
                 </div>

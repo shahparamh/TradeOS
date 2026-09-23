@@ -20,44 +20,60 @@ async def query_ollama(payload: str, system_prompt: str = SYSTEM_PROMPT) -> dict
     """
     start_time = time.time()
 
-    body = {
-        "model": settings.OLLAMA_MODEL,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": payload},
-        ],
-        "stream": False,
-        "options": {
-            "temperature": 0.3
-        }
-    }
-
     try:
-        async with httpx.AsyncClient(timeout=180.0) as client:
-            response = await client.post(OLLAMA_API_URL, json=body)
-
-        latency_ms = int((time.time() - start_time) * 1000)
-
-        if response.status_code != 200:
-            error_text = response.text
-            logger.error(f"Ollama API error ({response.status_code}): {error_text}")
-            return {
-                "agent": "Local-Ollama",
-                "provider": "ollama",
-                "decision": "HOLD",
-                "confidence": 0,
-                "reasoning": f"Local Ollama error {response.status_code}: {error_text[:200]}",
-                "is_valid": False,
-                "latency_ms": latency_ms,
-                "raw_response": error_text,
+        raw_text = None
+        parsed = None
+        latency_ms = 0
+        user_content = payload
+        # Up to 2 attempts: retry once, only on a parse failure. Reliability measure only --
+        # never changes what counts as BUY/HOLD, just gives malformed JSON one more chance
+        # before we tag it as a parse error in diagnostics.
+        for attempt in range(2):
+            body = {
+                "model": settings.OLLAMA_MODEL,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_content},
+                ],
+                "stream": False,
+                "options": {
+                    "temperature": 0.3
+                },
+                # Ollama supports a JSON-constrained output mode -- use it to cut down on
+                # unparseable output from smaller local models rather than relying solely
+                # on prompt instructions.
+                "format": "json",
             }
 
-        data = response.json()
-        raw_text = data["message"]["content"]
+            async with httpx.AsyncClient(timeout=180.0) as client:
+                response = await client.post(OLLAMA_API_URL, json=body)
+
+            latency_ms = int((time.time() - start_time) * 1000)
+
+            if response.status_code != 200:
+                error_text = response.text
+                logger.error(f"Ollama API error ({response.status_code}): {error_text}")
+                return {
+                    "agent": "Local-Ollama",
+                    "provider": "ollama",
+                    "decision": "HOLD",
+                    "confidence": 0,
+                    "reasoning": f"Local Ollama error {response.status_code}: {error_text[:200]}",
+                    "is_valid": False,
+                    "error_type": "provider_error",
+                    "latency_ms": latency_ms,
+                    "raw_response": error_text,
+                }
+
+            data = response.json()
+            raw_text = data["message"]["content"]
+            parsed = parse_ai_response(raw_text)
+            if parsed.get("error_type") != "parse_error":
+                break
+            user_content = f"{payload}\n\n(Your previous response was not valid JSON. Respond with ONLY the JSON object, no other text.)"
 
         logger.info(f"Local Ollama (Llama 3.2) responded in {latency_ms}ms")
 
-        parsed = parse_ai_response(raw_text)
         parsed["agent"] = "Local-Ollama"
         parsed["provider"] = "ollama"
         parsed["latency_ms"] = latency_ms
@@ -75,6 +91,7 @@ async def query_ollama(payload: str, system_prompt: str = SYSTEM_PROMPT) -> dict
             "confidence": 0,
             "reasoning": f"Local Ollama is offline or busy. Exception: {str(e)}",
             "is_valid": False,
+            "error_type": "provider_error",
             "latency_ms": latency_ms,
             "raw_response": str(e),
         }

@@ -1,8 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Zap, Activity, Shield, TrendingUp } from 'lucide-react';
 import { strategyAPI } from '../services/api';
+import { useMarket } from '../context/MarketContext';
+import { formatCurrency } from '../utils/currency';
 
 const PreMarket = () => {
+    const { market } = useMarket();
+    const fmt = (amount, opts) => formatCurrency(amount, market, opts);
     const [strategies, setStrategies] = useState([]);
     const [loadingStrategy, setLoadingStrategy] = useState(true);
     const [expandedStrategyId, setExpandedStrategyId] = useState(null);
@@ -95,9 +99,9 @@ const PreMarket = () => {
                                         </div>
                                         <div className="pm-item-right">
                                             <div className="pm-boundaries" style={{ gap: '20px', fontSize: '13px' }}>
-                                                <span>Range: <strong className="font-mono" style={{ color: 'var(--text-primary)' }}>₹{s.entry_lower_limit} - ₹{s.entry_upper_limit}</strong></span>
-                                                <span>Target: <strong className="font-mono text-profit">₹{s.target_price}</strong></span>
-                                                <span>SL: <strong className="font-mono text-loss">₹{s.stop_loss}</strong></span>
+                                                <span>Range: <strong className="font-mono" style={{ color: 'var(--text-primary)' }}>{fmt(s.entry_lower_limit)} - {fmt(s.entry_upper_limit)}</strong></span>
+                                                <span>Target: <strong className="font-mono text-profit">{fmt(s.target_price)}</strong></span>
+                                                <span>SL: <strong className="font-mono text-loss">{fmt(s.stop_loss)}</strong></span>
                                             </div>
                                             <span className="pm-toggle-icon">
                                                 {isExpanded ? '▲' : '▼'}

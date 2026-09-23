@@ -305,9 +305,18 @@ You will receive: the Technical/Fundamentals/Sentiment analyst reports, the Bull
 CRITICAL CONTEXT: capital is extremely small and a hard external Risk Engine will recompute your position size from scratch using
 1% of equity divided by your proposed stop-loss distance — your proposed quantity is IGNORED, so focus your effort on entry/stop/target quality, not sizing.
 This desk is CASH-EQUITY LONG-ONLY (no shorting, no options, no leverage, no futures).
-Prefer fewer, higher-quality setups over frequent trading — survival matters more than any single trade's upside.
 
-Weigh the Bull and Bear cases honestly; do not default to BUY just because a Bull case exists.
+Your job is to find actionable candidates with a technically coherent entry/stop/target, not to perform final portfolio or risk
+approval — a separate Portfolio Manager and a deterministic Risk Engine downstream will independently check portfolio fit and
+enforce the hard risk-reward/sizing/stop-loss rules. You may weigh risk-reward when judging whether a setup is worth proposing,
+but the final accept/reject decision on R:R and sizing belongs to the deterministic Risk Engine, not you.
+If the setup has a reasonable positive expected edge, a technically justified entry/stop/target, and no clear invalidation,
+propose BUY and allow downstream deterministic risk controls to make the final risk decision.
+A missing or incomplete data point should only justify HOLD if that specific field is essential to placing a valid stop-loss
+or entry for this decision — not simply because some optional context is unavailable.
+
+Weigh the Bull and Bear cases honestly; do not default to BUY just because a Bull case exists, and do not default to HOLD
+just because uncertainty exists. A trader who only holds can never generate returns.
 
 Respond ONLY with a valid JSON object — no markdown, no code fences.
 {
@@ -333,11 +342,29 @@ Respond ONLY with a valid JSON object — no markdown, no code fences.
 }}"""
 
 ARENA_PORTFOLIO_MANAGER_PROMPT = """You are the Portfolio Manager on a small AI trading desk running a survival-mode paper account with a TINY starting balance.
-This is the FINAL qualitative decision before the trade reaches a hard deterministic Risk Engine (which independently enforces position sizing,
-a 6% hard stop cap, max 2 open positions, a daily loss kill switch, and a permanent death threshold — you cannot override any of it).
-You will receive: the Trader's proposal and the Risk Team's conservative and aggressive reviews.
-If the Risk Team raises a serious, well-founded objection, override the Trader and output HOLD.
-Capital preservation and survival take priority over chasing return — when in doubt, HOLD.
+A separate deterministic Risk Engine downstream already enforces position sizing, a 6% hard stop cap, max open positions, a
+daily loss kill switch, and a permanent death threshold — it will apply those hard rules regardless of what you decide, so you
+do not need to (and should not) re-check them yourself.
+You will receive: the Trader's proposal, the Risk Team's conservative and aggressive reviews, and the current portfolio state
+(cash available, open positions, exposure, and today's realized P&L).
+
+Your ONLY question is: is this candidate sensible in the context of the current portfolio? You may override the Trader to
+HOLD ONLY for genuine portfolio-level conflicts visible in the supplied portfolio state, such as:
+- the desk is already meaningfully low on cash relative to a sensible position
+- this would clearly overconcentrate the portfolio (e.g. already holding this exact symbol, or open positions are already high)
+- today's realized P&L is already deeply negative, so adding a new risk-taking trade right now is imprudent
+
+Do NOT re-analyze or re-reject based on RSI, MACD, volume, valuation, chart patterns, or risk-reward ratio — the Trader and
+Risk Team have already judged the setup's quality, and the deterministic Risk Engine will independently enforce the hard R:R,
+stop-loss, and sizing rules next. Do not invent sector or correlation concerns if that data was not supplied to you.
+
+Reward-to-risk, stop-loss geometry, target quality, technical indicators, valuation, volume, news, and setup quality are NOT
+portfolio-level vetoes. Do not reject a Trader proposal for these reasons, even if they appear poor. The deterministic Risk
+Engine is solely responsible for hard R:R, stop, sizing, and execution validation. If no conflict exists in the supplied
+portfolio_state, approve the candidate for downstream validation.
+
+If you find no genuine portfolio-level conflict in the data you were given, approve the candidate and let it proceed to the
+deterministic Risk Engine, which is where hard risk rules are actually enforced.
 
 Respond ONLY with a valid JSON object — no markdown, no code fences.
 {
@@ -349,13 +376,14 @@ Respond ONLY with a valid JSON object — no markdown, no code fences.
     "quantity": 1,
     "trade_type": "INTRADAY",
     "position_type": "LONG",
-    "reasoning": "<2-3 sentences on why you approved or overrode the Trader>"
+    "reasoning": "<2-3 sentences on the portfolio-level basis for approving or holding>"
 }"""
 
 
-def build_arena_analyst_payload(symbol: str, indicators: dict, fundamentals: dict, news: list) -> str:
+def build_arena_analyst_payload(symbol: str, indicators: dict, fundamentals: dict, news: list, market: str = "IN") -> str:
     payload = {
         "symbol": symbol,
+        "market": market,
         "technical_indicators": indicators,
         "fundamentals": fundamentals,
         "recent_news": [
@@ -383,11 +411,12 @@ def build_arena_trader_payload(symbol: str, analyst_reports: dict, bull_argument
     return json.dumps(payload, indent=2, default=str)
 
 
-def build_arena_portfolio_manager_payload(symbol: str, trader_proposal: dict, risk_reviews: list) -> str:
+def build_arena_portfolio_manager_payload(symbol: str, trader_proposal: dict, risk_reviews: list, portfolio_state: dict) -> str:
     payload = {
         "symbol": symbol,
         "trader_proposal": trader_proposal,
         "risk_team_reviews": risk_reviews,
+        "portfolio_state": portfolio_state,
     }
     return json.dumps(payload, indent=2, default=str)
 
@@ -482,11 +511,15 @@ def parse_ai_response(raw_response: str) -> dict:
             try:
                 parsed = json.loads(text[start:end])
             except json.JSONDecodeError:
+                # NOTE: decision stays "HOLD" so the pipeline's actual trading behavior is
+                # unchanged (no trade proceeds on unparseable output) -- error_type is the
+                # signal that separates this from a genuine reasoned HOLD in diagnostics.
                 return {
                     "decision": "HOLD",
                     "confidence": 0,
                     "reasoning": "Failed to parse AI response",
                     "is_valid": False,
+                    "error_type": "parse_error",
                     "raw_text": raw_response[:500],
                 }
         else:
@@ -495,6 +528,7 @@ def parse_ai_response(raw_response: str) -> dict:
                 "confidence": 0,
                 "reasoning": "No JSON found in AI response",
                 "is_valid": False,
+                "error_type": "parse_error",
                 "raw_text": raw_response[:500],
             }
 

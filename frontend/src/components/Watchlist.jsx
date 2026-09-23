@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Star } from 'lucide-react';
 import { marketAPI } from '../services/api';
+import { useMarket } from '../context/MarketContext';
+import { formatCurrency } from '../utils/currency';
 
 // Short display names for the backend's tracked watchlist — falls back to the raw symbol.
 const DISPLAY_NAMES = {
@@ -18,6 +20,7 @@ const DISPLAY_NAMES = {
 };
 
 const Watchlist = ({ selectedSymbol, onSelect }) => {
+    const { market } = useMarket();
     const [symbols, setSymbols] = useState([]);
     const [quotes, setQuotes] = useState({});
     const [loading, setLoading] = useState(true);
@@ -44,7 +47,7 @@ const Watchlist = ({ selectedSymbol, onSelect }) => {
             .catch(() => {})
             .finally(() => setLoading(false));
         return () => clearInterval(interval);
-    }, [fetchQuotes]);
+    }, [fetchQuotes, market]);
 
     return (
         <div className="card watchlist-panel">
@@ -74,7 +77,7 @@ const Watchlist = ({ selectedSymbol, onSelect }) => {
                                     <span className="wl-name">{DISPLAY_NAMES[sym] || sym}</span>
                                 </div>
                                 <div className="wl-values">
-                                    <span className="wl-price mono">{q ? `₹${q.price.toLocaleString('en-IN')}` : '—'}</span>
+                                    <span className="wl-price mono">{q ? formatCurrency(q.price, q.market || market) : '—'}</span>
                                     <span className={`wl-change mono ${pct == null ? '' : pct >= 0 ? 'up' : 'down'}`}>
                                         {pct == null ? '—' : `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`}
                                     </span>

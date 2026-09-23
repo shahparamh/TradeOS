@@ -11,6 +11,9 @@ from database.models import Agent, Trade, Position, ArenaDebateLog, ArenaReflect
 from api.routes_auth import get_current_user
 from utils.constants import ARENA_WATCHLIST
 from utils.helpers import get_ist_now
+from broker.survival_risk_manager import SurvivalRiskManager
+from market_data.market_config import normalize_market, get_watchlist
+from market_data.factory import get_provider
 
 router = APIRouter(prefix="/arena", tags=["Survival Arena"])
 
@@ -21,8 +24,14 @@ def _agent_equity(agent: Agent, db: Session) -> float:
 
 
 @router.get("/agents")
-def list_arena_agents(db: Session = Depends(get_db)):
-    agents = db.query(Agent).filter(Agent.mode == "SURVIVAL").all()
+def list_arena_agents(market: Optional[str] = None, db: Session = Depends(get_db)):
+    query = db.query(Agent).filter(Agent.mode == "SURVIVAL")
+    if market is not None:
+        try:
+            query = query.filter(Agent.market == normalize_market(market))
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    agents = query.all()
     result = []
     for agent in agents:
         equity = _agent_equity(agent, db)
@@ -46,6 +55,7 @@ def list_arena_agents(db: Session = Depends(get_db)):
             "died_at": agent.died_at.isoformat() if agent.died_at else None,
             "survival_days": survival_days,
             "death_threshold": agent.death_threshold,
+            "market": getattr(agent, "market", "IN") or "IN",
         })
     return result
 
@@ -108,6 +118,7 @@ def get_arena_agent_detail(agent_id: int, db: Session = Depends(get_db)):
         "death_threshold": agent.death_threshold,
         "died_at": agent.died_at.isoformat() if agent.died_at else None,
         "created_at": agent.created_at.isoformat() if agent.created_at else None,
+        "market": getattr(agent, "market", "IN") or "IN",
         "stats": {
             "total_trades": len(trades),
             "closed_trades": len(closed),
@@ -121,12 +132,14 @@ def get_arena_agent_detail(agent_id: int, db: Session = Depends(get_db)):
             "symbol": p.symbol, "quantity": p.quantity, "entry_price": p.entry_price,
             "current_price": p.current_price, "stop_loss": p.stop_loss, "target_price": p.target_price,
             "unrealized_pnl": p.unrealized_pnl,
+            "market": getattr(p, "market", "IN") or "IN",
         } for p in positions],
         "trades": [{
             "id": t.id, "symbol": t.symbol, "action": t.action, "quantity": t.quantity,
             "entry_price": t.entry_price, "exit_price": t.exit_price, "pnl": t.pnl,
             "status": t.status, "entry_time": t.entry_time.isoformat() if t.entry_time else None,
             "exit_time": t.exit_time.isoformat() if t.exit_time else None,
+            "market": getattr(t, "market", "IN") or "IN",
         } for t in trades],
         "debate_transcripts": [{
             "id": d.id, "symbol": d.symbol, "cycle_id": d.cycle_id,
@@ -156,6 +169,7 @@ class CreateArenaAgent(BaseModel):
     model_name: str
     starting_capital: float = 2000.0
     death_threshold: Optional[float] = None
+    market: Optional[str] = "IN"
 
 
 @router.post("/agents")
@@ -168,6 +182,7 @@ def create_arena_agent(payload: CreateArenaAgent, db: Session = Depends(get_db),
         raise HTTPException(status_code=400, detail=f"An agent named '{payload.name}' already exists.")
 
     death_threshold = payload.death_threshold if payload.death_threshold is not None else payload.starting_capital * 0.10
+    market = normalize_market(getattr(payload, "market", None))
 
     agent = Agent(
         name=payload.name,
@@ -179,6 +194,7 @@ def create_arena_agent(payload: CreateArenaAgent, db: Session = Depends(get_db),
         total_pnl=0.0,
         is_active=True,
         mode="SURVIVAL",
+        market=market,
     )
     db.add(agent)
     db.commit()
@@ -212,26 +228,41 @@ def resume_arena(db: Session = Depends(get_db), current_user=Depends(get_current
 
 
 @router.get("/status")
-def arena_status(db: Session = Depends(get_db)):
+def arena_status(market: str = "IN", db: Session = Depends(get_db)):
+    try:
+        m = normalize_market(market)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     rule = db.query(SystemRule).filter(SystemRule.key == "arena_emergency_stop").first()
-    return {"emergency_stop": bool(rule.bool_value) if rule else False, "watchlist": ARENA_WATCHLIST}
+    return {"emergency_stop": bool(rule.bool_value) if rule else False, "market": m, "watchlist": get_watchlist(m)}
 
 
 @router.get("/market")
-def arena_market(db: Session = Depends(get_db)):
-    # One batched yfinance call for the whole watchlist instead of one rate-limited
-    # round trip per symbol (each of which would otherwise queue behind the global
-    # 3s-minimum gap between yfinance calls — 11 symbols serialized is 30s+ on a cold cache).
-    from data.market_fetcher import fetch_bulk_quotes
-    quotes = fetch_bulk_quotes(tuple(ARENA_WATCHLIST))
-    return [quotes[s] for s in ARENA_WATCHLIST if s in quotes]
+def arena_market(market: str = "IN", db: Session = Depends(get_db)):
+    # One batched call for the whole watchlist instead of one round trip per symbol.
+    try:
+        m = normalize_market(market)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    watchlist = get_watchlist(m)
+    try:
+        provider = get_provider(m)
+        quotes = provider.get_bulk_quotes(tuple(watchlist))
+    except Exception as e:
+        code = getattr(e, "code", "DATA_PROVIDER_ERROR")
+        raise HTTPException(status_code=502, detail={"error": code, "message": str(e)})
+    return [quotes[s] for s in watchlist if s in quotes]
 
 
 @router.post("/cycle-trigger")
-async def trigger_arena_cycle_manually():
+async def trigger_arena_cycle_manually(market: str = "IN"):
+    try:
+        m = normalize_market(market)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     from main import trading_scheduler
-    asyncio.create_task(trading_scheduler.run_arena_cycle(ignore_hours=True))
-    return {"status": "triggered", "message": "Survival Arena cycle started in background"}
+    asyncio.create_task(trading_scheduler.run_arena_cycle(ignore_hours=True, market=m))
+    return {"status": "triggered", "message": f"Survival Arena cycle started in background for market={m}"}
 
 
 # Ordered so the FIRST matching category (by earliest string position in the reasoning
@@ -294,6 +325,7 @@ def _extract_numeric_mentions(text: str) -> dict:
 def arena_diagnostics_outcomes(
     symbol: Optional[str] = None,
     agent_id: Optional[int] = None,
+    market: Optional[str] = None,
     limit: int = 100,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -308,7 +340,7 @@ def arena_diagnostics_outcomes(
     if current_user.role not in ["admin", "trader"]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to view Arena diagnostics.")
 
-    logs = _fetch_debate_logs(db, agent_id, symbol, limit)
+    logs = _fetch_debate_logs(db, agent_id, symbol, limit, market)
     results = _compute_outcome_rows(logs)
 
     # Quick aggregate: of the debates where we could measure a 60-min outcome, how often
@@ -327,12 +359,14 @@ def arena_diagnostics_outcomes(
     }
 
 
-def _fetch_debate_logs(db: Session, agent_id: Optional[int], symbol: Optional[str], limit: int):
+def _fetch_debate_logs(db: Session, agent_id: Optional[int], symbol: Optional[str], limit: int, market: Optional[str] = None):
     query = db.query(ArenaDebateLog).order_by(ArenaDebateLog.created_at.desc())
     if agent_id is not None:
         query = query.filter(ArenaDebateLog.agent_id == agent_id)
     if symbol is not None:
         query = query.filter(ArenaDebateLog.symbol == symbol)
+    if market is not None:
+        query = query.filter(ArenaDebateLog.market == normalize_market(market))
     return query.limit(limit).all()
 
 
@@ -395,6 +429,7 @@ def _compute_outcome_rows(logs: list) -> list:
         for log in sym_logs:
             trader = _safe_json(log.trader_proposal)
             pm = _safe_json(log.portfolio_manager_decision)
+            risk_engine = _safe_json(log.risk_engine_result)
             reports = _safe_json(log.analyst_reports)
             indicators = _safe_json(log.indicators_snapshot) if getattr(log, "indicators_snapshot", None) else {}
             tech = reports.get("technical", {}) if isinstance(reports, dict) else {}
@@ -457,6 +492,14 @@ def _compute_outcome_rows(logs: list) -> list:
                 "agent_id": log.agent_id,
                 "created_at": log.created_at.isoformat() if log.created_at else None,
                 "trader_decision": trader.get("decision"),
+                "trader_error_type": trader.get("error_type"),
+                "pm_error_type": pm.get("error_type") if pm else None,
+                "risk_engine_rejection_reason": risk_engine.get("rejection_reason") if risk_engine else None,
+                "risk_engine_computed_rr": risk_engine.get("risk_reward_ratio") if risk_engine else None,
+                "proposed_stop_loss": risk_engine.get("proposed_stop_loss") if risk_engine else None,
+                "final_stop_loss": risk_engine.get("final_stop_loss") if risk_engine else None,
+                "proposed_stop_distance_pct": risk_engine.get("proposed_stop_distance_pct") if risk_engine else None,
+                "final_stop_distance_pct": risk_engine.get("final_stop_distance_pct") if risk_engine else None,
                 "final_action": log.final_action,
                 "primary_reason": reason_split["primary_reason"],
                 "secondary_reasons": reason_split["secondary_reasons"],
@@ -513,7 +556,7 @@ def _rollup(rows: list, key_fn) -> list:
 
 
 @router.get("/diagnostics/summary")
-def arena_diagnostics_summary(agent_id: Optional[int] = None, limit: int = 500, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+def arena_diagnostics_summary(agent_id: Optional[int] = None, market: Optional[str] = None, limit: int = 500, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     """Rollup view over /diagnostics/outcomes: the same enriched rows, pre-grouped by the
     dimensions that matter for the volume-vs-fundamentals-vs-R:R calibration question —
     by primary rejection reason, by symbol, by R:R bucket, by volume-ratio bucket, and by
@@ -523,7 +566,7 @@ def arena_diagnostics_summary(agent_id: Optional[int] = None, limit: int = 500, 
     if current_user.role not in ["admin", "trader"]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to view Arena diagnostics.")
 
-    logs = _fetch_debate_logs(db, agent_id, None, limit)
+    logs = _fetch_debate_logs(db, agent_id, None, limit, market)
     rows = _compute_outcome_rows(logs)
 
     return {
@@ -583,7 +626,7 @@ def _classify_blocker(trader: dict, pm: dict, risk_engine: dict) -> str:
 
 
 @router.get("/diagnostics")
-def arena_diagnostics(agent_id: Optional[int] = None, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+def arena_diagnostics(agent_id: Optional[int] = None, market: Optional[str] = None, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     """Self-serve version of the manual debate-log analysis: for every stored debate, shows
     what the trader actually proposed (entry/stop/target/R:R when it got that far) and
     classifies WHY it didn't result in a trade — so a symbol that never reaches the R:R
@@ -597,6 +640,8 @@ def arena_diagnostics(agent_id: Optional[int] = None, db: Session = Depends(get_
     query = db.query(ArenaDebateLog).order_by(ArenaDebateLog.created_at.desc())
     if agent_id is not None:
         query = query.filter(ArenaDebateLog.agent_id == agent_id)
+    if market is not None:
+        query = query.filter(ArenaDebateLog.market == normalize_market(market))
     logs = query.limit(1000).all()
 
     per_symbol: dict[str, dict] = {}
@@ -670,7 +715,7 @@ _FUNNEL_ORDER = ["evaluated", "trader_buy_proposed", "pm_approved", "risk_engine
 
 
 @router.get("/diagnostics/funnel")
-def arena_diagnostics_funnel(agent_id: Optional[int] = None, limit: int = 1000, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+def arena_diagnostics_funnel(agent_id: Optional[int] = None, market: Optional[str] = None, limit: int = 1000, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     """Answers "why isn't this converting to trades" directly, instead of describing
     rejection quality in isolation:
     - overall + per-symbol conversion funnel (evaluated -> trader BUY -> PM keeps it ->
@@ -687,7 +732,7 @@ def arena_diagnostics_funnel(agent_id: Optional[int] = None, limit: int = 1000, 
     if current_user.role not in ["admin", "trader"]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to view Arena diagnostics.")
 
-    logs = _fetch_debate_logs(db, agent_id, None, limit)
+    logs = _fetch_debate_logs(db, agent_id, None, limit, market)
     rows = _compute_outcome_rows(logs)
 
     # --- Overall + per-symbol funnel ---
@@ -726,9 +771,124 @@ def arena_diagnostics_funnel(agent_id: Optional[int] = None, limit: int = 1000, 
         }
 
     overall_funnel = _build_funnel(rows)
+
+    # --- Reliability-aware funnel: separates infra/model-interface failures (parse errors,
+    # provider errors) from genuine reasoned BUY/HOLD decisions at each stage. A row whose
+    # Trader response failed to parse or hit a provider error is NOT a "reasoned HOLD" for
+    # this view, even though the live pipeline still (correctly, conservatively) treats it
+    # as a non-BUY -- that trading behavior is unchanged, this is purely a diagnostics split.
+    def _build_reliability_funnel(subset: list) -> dict:
+        total = len(subset)
+        trader_parse_errors = sum(1 for r in subset if r["trader_error_type"] == "parse_error")
+        trader_provider_errors = sum(1 for r in subset if r["trader_error_type"] == "provider_error")
+        valid_trader = [r for r in subset if not r["trader_error_type"]]
+        trader_buy = sum(1 for r in valid_trader if r["trader_decision"] == "BUY")
+        trader_hold = sum(1 for r in valid_trader if r["trader_decision"] != "BUY")
+
+        # PM only ever runs on rows where the (valid) Trader proposed BUY
+        pm_candidates = [r for r in valid_trader if r["trader_decision"] == "BUY"]
+        pm_parse_errors = sum(1 for r in pm_candidates if r["pm_error_type"] == "parse_error")
+        pm_provider_errors = sum(1 for r in pm_candidates if r["pm_error_type"] == "provider_error")
+        valid_pm = [r for r in pm_candidates if not r["pm_error_type"]]
+        pm_buy = sum(1 for r in valid_pm if r["final_action"] in ("BUY", "REJECTED"))
+        pm_hold = len(valid_pm) - pm_buy
+
+        risk_engine_reached = sum(1 for r in pm_candidates if r["final_action"] in ("BUY", "REJECTED"))
+        risk_engine_approved = sum(1 for r in pm_candidates if r["final_action"] == "BUY")
+        risk_engine_rejected_rows = [r for r in pm_candidates if r["final_action"] == "REJECTED"]
+        executed = risk_engine_approved
+
+        # Classify each risk-engine rejection by which deterministic check actually fired,
+        # keyed off the reason-string prefix each check in SurvivalRiskManager uses.
+        def _risk_engine_category(reason: str) -> str:
+            if not reason:
+                return "unknown"
+            if reason.startswith("RISK_REWARD_REJECTED"):
+                return "risk_reward"
+            if reason.startswith("INVALID_GEOMETRY"):
+                return "invalid_geometry"
+            if reason.startswith("DEATH_THRESHOLD"):
+                return "death_threshold"
+            if reason.startswith("MAX_DRAWDOWN_EXCEEDED"):
+                return "drawdown"
+            if reason.startswith("DAILY_KILL_SWITCH"):
+                return "daily_kill_switch"
+            if "Max open positions" in reason:
+                return "position_limit"
+            if "Already have an open position" in reason:
+                return "duplicate_position"
+            if "Computed position size is below" in reason or "Insufficient cash" in reason or "Stop distance is zero" in reason:
+                return "sizing_or_cash"
+            if reason.startswith("OPTIONS_DISABLED") or reason.startswith("SHORT_SELLING_DISABLED"):
+                return "instrument_disabled"
+            if reason == "Market is closed":
+                return "market_hours"
+            return "other"
+
+        risk_engine_rejection_categories: dict[str, int] = {}
+        for r in risk_engine_rejected_rows:
+            cat = _risk_engine_category(r["risk_engine_rejection_reason"])
+            risk_engine_rejection_categories[cat] = risk_engine_rejection_categories.get(cat, 0) + 1
+
+        # --- R:R distribution among candidates that actually reached the risk engine ---
+        rr_values = [r["risk_engine_computed_rr"] for r in pm_candidates if r["risk_engine_computed_rr"] is not None]
+        rr_distribution = {
+            "count": len(rr_values),
+            "min": round(min(rr_values), 2) if rr_values else None,
+            "max": round(max(rr_values), 2) if rr_values else None,
+            "avg": round(sum(rr_values) / len(rr_values), 2) if rr_values else None,
+            "below_min_rr_count": sum(1 for v in rr_values if v < SurvivalRiskManager.MIN_RISK_REWARD_RATIO),
+        }
+
+        # --- 6% stop-clamp frequency/magnitude, purely observational -- clamp behavior itself
+        # is untouched. "Clamped" = final stop distance was pulled in from what was proposed.
+        clamp_rows = [
+            r for r in pm_candidates
+            if r["proposed_stop_distance_pct"] is not None and r["final_stop_distance_pct"] is not None
+        ]
+        clamped_rows = [r for r in clamp_rows if r["proposed_stop_distance_pct"] > r["final_stop_distance_pct"]]
+        clamp_deltas = [round(r["proposed_stop_distance_pct"] - r["final_stop_distance_pct"], 4) for r in clamped_rows]
+        stop_clamp_stats = {
+            "candidates_with_stop_data": len(clamp_rows),
+            "clamped_count": len(clamped_rows),
+            "clamped_rate": round(len(clamped_rows) / len(clamp_rows), 3) if clamp_rows else None,
+            "avg_clamp_delta_pct": round(sum(clamp_deltas) / len(clamp_deltas), 4) if clamp_deltas else None,
+            "max_clamp_delta_pct": round(max(clamp_deltas), 4) if clamp_deltas else None,
+        }
+
+        return {
+            "total_evaluated": total,
+            "trader_parse_errors": trader_parse_errors,
+            "trader_provider_errors": trader_provider_errors,
+            "valid_trader_responses": len(valid_trader),
+            "trader_buy": trader_buy,
+            "trader_hold": trader_hold,
+            "trader_buy_rate_of_valid": round(trader_buy / len(valid_trader), 3) if valid_trader else None,
+            "pm_candidates": len(pm_candidates),
+            "pm_parse_errors": pm_parse_errors,
+            "pm_provider_errors": pm_provider_errors,
+            "valid_pm_responses": len(valid_pm),
+            "pm_buy": pm_buy,
+            "pm_hold": pm_hold,
+            "pm_approval_rate_of_valid": round(pm_buy / len(valid_pm), 3) if valid_pm else None,
+            "risk_engine_reached": risk_engine_reached,
+            "risk_engine_approved": risk_engine_approved,
+            "risk_engine_rejected": len(risk_engine_rejected_rows),
+            "risk_engine_rejection_categories": risk_engine_rejection_categories,
+            "risk_reward_distribution_at_risk_engine": rr_distribution,
+            "stop_clamp_stats": stop_clamp_stats,
+            "executed": executed,
+            "execution_rate_of_valid_trader": round(executed / len(valid_trader), 3) if valid_trader else None,
+        }
+
+    reliability_funnel = _build_reliability_funnel(rows)
+
     by_symbol_funnel = {}
+    by_symbol_reliability_funnel = {}
     for sym in sorted({r["symbol"] for r in rows}):
-        by_symbol_funnel[sym] = _build_funnel([r for r in rows if r["symbol"] == sym])
+        sym_rows = [r for r in rows if r["symbol"] == sym]
+        by_symbol_funnel[sym] = _build_funnel(sym_rows)
+        by_symbol_reliability_funnel[sym] = _build_reliability_funnel(sym_rows)
     # Symbols that basically never get past the trader's own judgment
     dead_symbols = sorted(
         by_symbol_funnel.items(),
@@ -793,8 +953,12 @@ def arena_diagnostics_funnel(agent_id: Optional[int] = None, limit: int = 1000, 
         "total_debates": len(rows),
         "final_action_breakdown": final_actions,
         "overall_funnel": overall_funnel,
+        "reliability_funnel": reliability_funnel,
+        "provider_errors_total": reliability_funnel["trader_provider_errors"] + reliability_funnel["pm_provider_errors"],
+        "parse_errors_total": reliability_funnel["trader_parse_errors"] + reliability_funnel["pm_parse_errors"],
         "symbols_that_never_reach_buy_proposal": never_reaches_buy,
         "by_symbol_funnel": by_symbol_funnel,
+        "by_symbol_reliability_funnel": by_symbol_reliability_funnel,
         "near_miss_single_reason_positive_mfe": near_misses,
         "stacking_by_reason_count": stacking,
         "reason_protectiveness_ranked": protectiveness,
@@ -807,5 +971,34 @@ def arena_diagnostics_funnel(agent_id: Optional[int] = None, limit: int = 1000, 
             "net_suppression_score": "avg_mfe_pct + avg_mae_pct for that reason's HOLDs. Positive = mostly "
                                       "missing upside without avoiding much downside (frequency-suppressing). "
                                       "Negative = genuinely avoiding real drawdown (protective).",
+            "reliability_funnel": "evaluated -> valid Trader response -> Trader BUY/HOLD -> valid PM response "
+                                   "-> PM BUY/HOLD -> risk engine reached -> risk engine approved -> executed. "
+                                   "'Valid' excludes rows where trader_error_type/pm_error_type is set: "
+                                   "'parse_error' means the LLM's raw text never became valid JSON (agents/prompts.py "
+                                   "parse_ai_response) — the pipeline still conservatively treats it as a non-BUY, "
+                                   "but it is NOT a reasoned decision and is excluded from trader_buy/trader_hold/"
+                                   "pm_buy/pm_hold counts here. 'provider_error' means the call never reached the "
+                                   "model at all (exhausted/missing keys, HTTP failure, timeout). overall_funnel "
+                                   "above (evaluated -> trader_buy_proposed -> ...) is unchanged and still counts "
+                                   "parse/provider-error rows as HOLD, matching the live trading pipeline's actual "
+                                   "behavior — reliability_funnel is the diagnostic view that separates them out.",
+            "risk_engine_rejection_categories": "Classifies each risk-engine rejection by which deterministic check "
+                                   "fired, parsed from the rejection_reason string SurvivalRiskManager returns: "
+                                   "'risk_reward' = RISK_REWARD_REJECTED (R:R below MIN_RISK_REWARD_RATIO, currently "
+                                   "2.0 — the sole authoritative R:R gate; Trader/PM no longer veto on R:R), "
+                                   "'invalid_geometry' = malformed stop/target for a long position, 'sizing_or_cash' "
+                                   "= position size rounds to 0 or cash is insufficient, plus death_threshold/"
+                                   "drawdown/daily_kill_switch/position_limit/duplicate_position/market_hours/"
+                                   "instrument_disabled for the other hard checks.",
+            "risk_reward_distribution_at_risk_engine": "min/max/avg/below_min_rr_count of risk_engine_computed_rr "
+                                   "across every PM-approved candidate that reached the risk engine (whether it was "
+                                   "ultimately approved or rejected) — the data needed to later judge whether 2.0 is "
+                                   "too restrictive, without having changed it to find out.",
+            "stop_clamp_stats": "Frequency/magnitude of the 6% hard stop-loss clamp (SurvivalRiskManager."
+                                   "HARD_STOP_LOSS_PCT), purely observational — the clamp's own behavior is "
+                                   "unchanged. proposed_stop_distance_pct/final_stop_distance_pct are logged on "
+                                   "every candidate that reaches the risk engine; 'clamped' = the final stop was "
+                                   "pulled in tighter than what was proposed. avg/max_clamp_delta_pct measure how "
+                                   "much the Trader's intended invalidation level shifted when it did fire.",
         },
     }

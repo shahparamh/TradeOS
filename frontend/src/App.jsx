@@ -6,6 +6,7 @@ import TopBar from './components/TopBar';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { MarketProvider } from './context/MarketContext';
 import './App.css';
 
 // Everything but Login/Dashboard is lazy-loaded per route: keeps the initial JS bundle
@@ -72,7 +73,9 @@ function App() {
   return (
     <Router>
       <AuthProvider>
-        <AppContent />
+        <MarketProvider>
+          <AppContent />
+        </MarketProvider>
         <Toaster
           position="bottom-right"
           toastOptions={{

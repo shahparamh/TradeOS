@@ -16,6 +16,11 @@ logger = setup_logger("survival_risk_manager")
 class SurvivalRiskManager:
     MAX_RISK_PER_TRADE_PCT = 0.01      # 1% of current equity risked per trade
     HARD_STOP_LOSS_PCT = 0.06          # 6% max stop distance from entry
+    MIN_RISK_REWARD_RATIO = 2.0        # reward/risk must be at least this, computed against
+                                        # the FINAL (possibly 6%-clamped) stop -- the single
+                                        # authoritative R:R gate; Trader may weigh R:R
+                                        # qualitatively but does not enforce it, and PM is
+                                        # explicitly barred from re-litigating it
     MAX_OPEN_POSITIONS = 2
     DAILY_LOSS_KILL_SWITCH_PCT = -0.05  # -5% of starting capital in one day halts new entries
     MAX_TOTAL_DRAWDOWN_PCT = -0.30      # -30% of starting capital is the outer drawdown guard
@@ -51,12 +56,53 @@ class SurvivalRiskManager:
         if not entry or not stop_loss or not target:
             return {"approved": False, "rejection_reason": "Missing entry price, stop loss, or target", "decision": decision}
 
+        # Log both sides of the clamp unconditionally (whether or not it actually fires) so
+        # downstream diagnostics can quantify how often/how much it changes the Trader's
+        # intended stop, without changing the clamp's behavior itself.
+        proposed_stop_loss = stop_loss
+        proposed_stop_distance_pct = round(abs(entry - stop_loss) / entry, 4)
+        decision["proposed_stop_loss"] = proposed_stop_loss
+        decision["proposed_stop_distance_pct"] = proposed_stop_distance_pct
+
         sl_distance_pct = abs(entry - stop_loss) / entry
         if sl_distance_pct > self.HARD_STOP_LOSS_PCT:
+            # NOTE: this silently TIGHTENS an excessively wide stop rather than rejecting the
+            # trade outright. Left exactly as-is for this patch (flagged separately for later
+            # review) -- tightening an AI-proposed technical stop can change what the setup
+            # actually means and can artificially inflate the R:R computed just below against
+            # this clamped value. Not addressed here to avoid mixing two policy changes.
             direction = 1 if decision.get("decision") == "BUY" else -1
             stop_loss = entry * (1 - direction * self.HARD_STOP_LOSS_PCT)
             decision["stop_loss"] = round(stop_loss, 2)
             sl_distance_pct = self.HARD_STOP_LOSS_PCT
+
+        final_stop = decision["stop_loss"]
+        decision["final_stop_loss"] = final_stop
+        decision["final_stop_distance_pct"] = round(abs(entry - final_stop) / entry, 4)
+
+        # Long-only geometry sanity check, ahead of the R:R math below -- a malformed
+        # stop/target (on the wrong side of entry) makes risk/reward undefined or negative.
+        if final_stop >= entry:
+            return {"approved": False, "rejection_reason": f"INVALID_GEOMETRY: Stop-loss {final_stop} is not below entry {entry} for a long position.", "decision": decision}
+        if target <= entry:
+            return {"approved": False, "rejection_reason": f"INVALID_GEOMETRY: Target {target} is not above entry {entry} for a long position.", "decision": decision}
+
+        risk = entry - final_stop
+        reward = target - entry
+        if risk <= 0 or reward <= 0:
+            return {"approved": False, "rejection_reason": f"INVALID_GEOMETRY: Non-positive risk ({risk}) or reward ({reward}).", "decision": decision}
+
+        # Deterministic, authoritative R:R gate -- the Trader may weigh R:R qualitatively and
+        # the Portfolio Manager is explicitly barred from re-litigating it; this is the one
+        # place it is actually enforced, computed against the final (post-clamp) stop.
+        computed_rr = round(reward / risk, 2)
+        decision["risk_reward_ratio"] = computed_rr
+        if computed_rr < self.MIN_RISK_REWARD_RATIO:
+            return {
+                "approved": False,
+                "rejection_reason": f"RISK_REWARD_REJECTED: Risk-reward {computed_rr:.2f} below minimum {self.MIN_RISK_REWARD_RATIO:.2f}.",
+                "decision": decision,
+            }
 
         # Deterministic position sizing: risk_amount / stop_distance — the AI's proposed
         # quantity is discarded entirely in favor of this formula (spec section 13).
@@ -86,8 +132,15 @@ class SurvivalRiskManager:
     def _check_market_hours(self, decision: dict) -> dict:
         if decision.get("ignore_hours"):
             return {"passed": True}
-        if not is_market_open():
-            return {"passed": False, "reason": "Market is closed"}
+        market = decision.get("market", "IN")
+        if market == "IN":
+            if not is_market_open():
+                return {"passed": False, "reason": "Market is closed"}
+            return {"passed": True}
+        # Non-IN markets: the scheduler only invokes run_arena_cycle during that market's
+        # own regular session (see trading_loop.py), so by the time a decision reaches here
+        # the session is already known-open. This check exists only to preserve NSE-hours
+        # behavior unchanged for IN; it does not gate other markets.
         return {"passed": True}
 
     def _check_options_leverage_short(self, decision: dict) -> dict:

@@ -3,8 +3,10 @@ import { useSearchParams } from 'react-router-dom';
 import { TrendingUp, TrendingDown, BarChart2, RefreshCw, Activity, Cpu, Search, Newspaper } from 'lucide-react';
 import api, { marketAPI } from '../services/api';
 import CandlestickChart from '../components/CandlestickChart';
-import { NIFTY50_SYMBOLS } from '../utils/symbols';
+import { NIFTY50_SYMBOLS, US_SYMBOLS } from '../utils/symbols';
 import { toChartTime } from '../utils/chartTime';
+import { useMarket } from '../context/MarketContext';
+import { formatCurrency } from '../utils/currency';
 
 const SENTIMENT_STYLE = {
   positive: { bg: 'var(--green-glow)', color: 'var(--green-profit)' },
@@ -32,6 +34,9 @@ const getHeatColor = (pct) => {
 };
 
 const Market = () => {
+  const { market, meta } = useMarket();
+  const fmt = (amount, opts) => formatCurrency(amount, market, opts);
+  const watchlistSymbols = market === 'US' ? US_SYMBOLS : NIFTY50_SYMBOLS;
   const [indices, setIndices]   = useState([]);
   const [stocks, setStocks]     = useState([]);
   const [loading, setLoading]   = useState(true);
@@ -58,7 +63,7 @@ const Market = () => {
     else if (tf === '5y') { interval = '1d'; period = '5y'; }
 
     try {
-      const res = await api.get(`/market/candles/${symbol}?interval=${interval}&period=${period}`);
+      const res = await api.get(`/market/candles/${symbol}`, { params: { interval, period, market } });
       const formatted = res.data.map(c => ({
         time: toChartTime(c.datetime),
         open: c.open,
@@ -75,7 +80,7 @@ const Market = () => {
   };
 
   const handleStockClick = async (symbol) => {
-    const fullSymbol = symbol.endsWith('.NS') ? symbol : `${symbol}.NS`;
+    const fullSymbol = market === 'US' ? symbol : (symbol.endsWith('.NS') ? symbol : `${symbol}.NS`);
     setSelectedStock(fullSymbol);
     await handleTimeframeChange('5d', fullSymbol);
   };
@@ -97,7 +102,7 @@ const Market = () => {
       const ticker = rawTicker.trim().toUpperCase();
       // This call concurrently queries every active AI provider plus fetches news/fundamentals —
       // routinely takes 40-60s, well past the default 30s client timeout.
-      const res = await api.get(`/scanner/analyze/${ticker}`, { timeout: 90000 });
+      const res = await api.get(`/scanner/analyze/${ticker}`, { timeout: 90000, params: { market } });
       if (res.data.status === 'success') {
         setAnalysisResult(res.data);
       } else {
@@ -130,23 +135,31 @@ const Market = () => {
 
   /* ---- Indices ---- */
   const fetchIndices = useCallback(async () => {
+    // US index quotes aren't wired into /market/indices yet (backend returns 501) — don't
+    // show stale Nifty/Sensex numbers, or a spurious error, when US is selected.
+    if (market !== 'IN') {
+      setIndices([]);
+      setLoading(false);
+      return;
+    }
     try {
       const res = await marketAPI.getIndices();
       setIndices(res.data);
     } catch (_) {}
     finally { setLoading(false); }
-  }, []);
+  }, [market]);
 
   /* ---- Live stock prices for heatmap ---- */
   const fetchStocks = useCallback(async () => {
     setStocksLoading(true);
     try {
-      const fullSymbols = NIFTY50_SYMBOLS.map(sym => `${sym}.NS`);
+      const suffix = market === 'US' ? '' : '.NS';
+      const fullSymbols = watchlistSymbols.map(sym => `${sym}${suffix}`);
       const res = await marketAPI.getPrices(fullSymbols);
       const quotes = res.data;
-      const data = NIFTY50_SYMBOLS
+      const data = watchlistSymbols
         .map(sym => {
-          const q = quotes[`${sym}.NS`];
+          const q = quotes[`${sym}${suffix}`];
           if (!q) return null;
           return {
             symbol: sym,
@@ -163,7 +176,7 @@ const Market = () => {
       setStocksLoading(false);
       setLastRefresh(new Date());
     }
-  }, []);
+  }, [market, watchlistSymbols]);
 
   useEffect(() => {
     fetchIndices();
@@ -178,7 +191,7 @@ const Market = () => {
       <header className="page-header">
         <div>
           <h1>Market Overview</h1>
-          <p className="subtitle">Live NSE data — indices, Nifty 50 heatmap & stock prices</p>
+          <p className="subtitle">Live {meta.exchange} data — indices, {market === 'US' ? 'watchlist' : 'Nifty 50'} heatmap & stock prices</p>
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:12 }}>
           {lastRefresh && (
@@ -191,7 +204,7 @@ const Market = () => {
           </button>
           <div className="market-badge">
             <div className="pulse-dot green"></div>
-            NSE LIVE
+            {meta.exchange} LIVE
           </div>
         </div>
       </header>
@@ -204,7 +217,7 @@ const Market = () => {
           <div key={idx.symbol} className="index-chip card">
             <div className="ic-name">{idx.symbol}</div>
             <div className="ic-price mono">
-              {idx.price != null ? idx.price.toLocaleString('en-IN') : '—'}
+              {idx.price != null ? idx.price.toLocaleString(market === 'US' ? 'en-US' : 'en-IN') : '—'}
             </div>
             <div className={`ic-change ${(idx.percent_change||0) >= 0 ? 'up' : 'down'}`}>
               {(idx.percent_change||0) >= 0 ? <TrendingUp size={11}/> : <TrendingDown size={11}/>}
@@ -296,7 +309,7 @@ const Market = () => {
                   </div>
                   <div style={{ textAlign: 'right' }}>
                     <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
-                      ₹{analysisResult.price?.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      {analysisResult.price != null ? fmt(analysisResult.price) : '—'}
                     </div>
                     <span className="badge" style={{
                       background: analysisResult.technical_summary?.trend?.includes('bullish') ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
@@ -391,7 +404,6 @@ const Market = () => {
                   if (dec.agent?.toLowerCase().includes('gemini')) brandColor = 'var(--color-gemini)';
                   else if (dec.agent?.toLowerCase().includes('groq')) brandColor = 'var(--color-groq)';
                   else if (dec.agent?.toLowerCase().includes('qwen')) brandColor = 'var(--accent-cyan)';
-                  else if (dec.agent?.toLowerCase().includes('deepseek')) brandColor = 'var(--color-github)';
                   else if (dec.agent?.toLowerCase().includes('ollama') || dec.agent?.toLowerCase().includes('local')) brandColor = 'var(--green-profit)';
 
 
@@ -427,13 +439,13 @@ const Market = () => {
                             <div>
                               <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>STOP LOSS</div>
                               <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
-                                ₹{dec.stop_loss ? dec.stop_loss.toLocaleString('en-IN') : '—'}
+                                {dec.stop_loss ? fmt(dec.stop_loss) : '—'}
                               </div>
                             </div>
                             <div>
                               <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>TARGET</div>
                               <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
-                                ₹{dec.target ? dec.target.toLocaleString('en-IN') : '—'}
+                                {dec.target ? fmt(dec.target) : '—'}
                               </div>
                             </div>
                           </div>
@@ -470,7 +482,7 @@ const Market = () => {
       {view === 'heatmap' && (
         <div className="card heatmap-card">
           <div className="section-header">
-            <h3 className="section-title"><BarChart2 size={17}/> Nifty 50 Heatmap</h3>
+            <h3 className="section-title"><BarChart2 size={17}/> {market === 'US' ? 'US Watchlist' : 'Nifty 50'} Heatmap</h3>
             <span className="badge">LIVE PRICES</span>
           </div>
           {stocksLoading ? (
@@ -489,7 +501,7 @@ const Market = () => {
                   >
                     <span className="hc-symbol">{s.symbol}</span>
                     <span className="mono" style={{ fontSize:11, color:'var(--text-secondary)' }}>
-                      ₹{s.price?.toLocaleString('en-IN', { maximumFractionDigits:1 })}
+                      {s.price != null ? fmt(s.price, { maximumFractionDigits: 1, minimumFractionDigits: 0 }) : '—'}
                     </span>
                     <span className={`hc-change ${pct >= 0 ? 'text-profit':'text-loss'}`}>
                       {pct >= 0 ? '+':''}{pct.toFixed(2)}%
@@ -506,7 +518,7 @@ const Market = () => {
       {view === 'table' && (
         <div className="card history-table-card">
           <div style={{ padding:'16px 20px', borderBottom:'1px solid var(--border-color)', fontWeight:700, fontSize:14 }}>
-            Nifty 50 — Live Quotes
+            {market === 'US' ? 'US Watchlist' : 'Nifty 50'} — Live Quotes
           </div>
           {stocksLoading ? (
             <div className="table-loading">Loading…</div>
@@ -530,7 +542,7 @@ const Market = () => {
                       <tr key={s.symbol} className="hist-row" style={{ cursor: 'pointer' }} onClick={() => handleStockClick(s.symbol)}>
                         <td style={{ color:'var(--text-muted)', fontWeight:700 }}>{i+1}</td>
                         <td className="fw-bold">{s.symbol}</td>
-                        <td className="mono fw-bold">₹{s.price?.toLocaleString('en-IN', { minimumFractionDigits:2 })}</td>
+                        <td className="mono fw-bold">{s.price != null ? fmt(s.price) : '—'}</td>
                         <td className={`mono ${up?'text-profit':'text-loss'}`}>
                           {up?'+':''}{(s.change||0).toFixed(2)}
                         </td>
@@ -654,7 +666,7 @@ const Market = () => {
               {chartLoading ? (
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
                   <RefreshCw size={30} className="spin" style={{ color: 'var(--accent-cyan)' }} />
-                  <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Fetching live NSE chart data…</span>
+                  <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Fetching live {meta.exchange} chart data…</span>
                 </div>
               ) : chartData.length > 0 ? (
                 <CandlestickChart data={chartData} height={350} />

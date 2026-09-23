@@ -29,11 +29,15 @@ run_lightweight_migrations()
 def seed_db():
     db = SessionLocal()
     
-    # Purge existing openrouter agents and their dependencies
-    openrouter_agents = db.query(Agent).filter(Agent.provider == "openrouter").all()
-    if openrouter_agents:
+    # Purge existing openrouter/github/deepseek agents and their dependencies — these
+    # providers have been removed from the app entirely (github's endpoint was dead;
+    # deepseek was dropped by request), so any leftover rows from before removal must not
+    # linger as inert-but-visible agents.
+    purged_providers = ("openrouter", "github", "deepseek")
+    purged_agents = db.query(Agent).filter(Agent.provider.in_(purged_providers)).all()
+    if purged_agents:
         from database.models import Trade, Position, DailyPerformance, AIResponse, AgentDailyStrategy
-        for agent in openrouter_agents:
+        for agent in purged_agents:
             db.query(Position).filter(Position.agent_id == agent.id).delete()
             db.query(Trade).filter(Trade.agent_id == agent.id).delete()
             db.query(DailyPerformance).filter(DailyPerformance.agent_id == agent.id).delete()
@@ -41,14 +45,12 @@ def seed_db():
             db.query(AgentDailyStrategy).filter(AgentDailyStrategy.agent_id == agent.id).delete()
             db.delete(agent)
         db.commit()
-    
+
     # 1. Seed default agents
     existing_names = {a.name for a in db.query(Agent).all()}
     default_agents = [
         Agent(name="Gemini", model_name=settings.GEMINI_MODEL, provider="google", cash_balance=settings.INITIAL_CAPITAL, total_pnl=0.0),
         Agent(name="Groq-Llama", model_name="llama-3.3-70b", provider="groq", cash_balance=settings.INITIAL_CAPITAL, total_pnl=0.0),
-        Agent(name="GitHub Model", model_name=settings.GITHUB_MODEL, provider="github", cash_balance=settings.INITIAL_CAPITAL, total_pnl=0.0),
-        Agent(name="DeepSeek-R1", model_name="deepseek-reasoning", provider="deepseek", cash_balance=settings.INITIAL_CAPITAL, total_pnl=0.0),
         Agent(name="Local-Ollama", model_name="llama3.2", provider="ollama", cash_balance=settings.INITIAL_CAPITAL, total_pnl=0.0)
     ]
     for agent in default_agents:
@@ -128,10 +130,6 @@ def seed_db():
             has_key = bool(settings.GEMINI_API_KEY or settings.GEMINI_API_KEYS)
         elif agent.provider == "groq":
             has_key = bool(settings.GROQ_API_KEY or settings.GROQ_API_KEYS)
-        elif agent.provider == "github":
-            has_key = bool(settings.GITHUB_API_KEY)
-        elif agent.provider == "deepseek":
-            has_key = bool(settings.DEEPSEEK_API_KEY)
         elif agent.provider == "ollama":
             has_key = True  # Local Ollama doesn't need an external API key
             

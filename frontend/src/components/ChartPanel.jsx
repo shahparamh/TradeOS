@@ -3,6 +3,7 @@ import { RefreshCw } from 'lucide-react';
 import api from '../services/api';
 import CandlestickChart from './CandlestickChart';
 import { toChartTime } from '../utils/chartTime';
+import { formatCurrency } from '../utils/currency';
 
 // How often to silently re-fetch candles in the background so the chart keeps moving
 // without a manual refresh. Matches the backend's 60s TTL cache on intraday candles —
@@ -56,16 +57,17 @@ const ChartPanel = ({ symbol, quote }) => {
     const pct = quote?.percent_change;
     const isUp = pct != null && pct >= 0;
     const displayName = symbol ? symbol.replace('.NS', '') : '—';
+    const quoteMarket = quote?.market || 'IN';
 
     return (
         <div className="card chart-panel">
             <div className="chart-panel-header">
                 <div className="chart-instrument">
                     <span className="chart-symbol mono">{displayName}</span>
-                    <span className="chart-exchange">NSE</span>
+                    <span className="chart-exchange">{quoteMarket === 'US' ? 'NASDAQ/NYSE' : 'NSE'}</span>
                     {quote && (
                         <>
-                            <span className="chart-price mono">₹{quote.price?.toLocaleString('en-IN')}</span>
+                            <span className="chart-price mono">{formatCurrency(quote.price, quoteMarket)}</span>
                             <span className={`chart-change mono ${isUp ? 'up' : 'down'}`}>
                                 {isUp ? '+' : ''}{quote.change?.toFixed(2)} ({isUp ? '+' : ''}{pct?.toFixed(2)}%)
                             </span>

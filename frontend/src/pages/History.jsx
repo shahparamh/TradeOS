@@ -4,11 +4,14 @@ import {
     MessageSquare, TrendingUp, TrendingDown
 } from 'lucide-react';
 import { brokerAPI } from '../services/api';
+import { useMarket } from '../context/MarketContext';
+import { formatCurrency } from '../utils/currency';
 
 const HistoryRow = ({ trade }) => {
     const [expanded, setExpanded] = useState(false);
     const isProfit = (trade.pnl || 0) > 0;
     const isOpen = (trade.status || '').toUpperCase() === 'OPEN' || (!trade.exit_price && trade.pnl === null);
+    const fmt = (amount, opts) => formatCurrency(amount, trade.market || 'IN', opts);
 
     const agentColor = {
         1: 'var(--color-gemini)',
@@ -37,17 +40,17 @@ const HistoryRow = ({ trade }) => {
                         {trade.position_type || 'LONG'}
                     </span>
                 </td>
-                <td className="mono">₹{trade.entry_price?.toLocaleString('en-IN')}</td>
+                <td className="mono">{trade.entry_price != null ? fmt(trade.entry_price) : '—'}</td>
                 <td className="mono">
                     {trade.exit_price ? (
-                        <span title={trade.exit_market_price ? `Exit market: ₹${trade.exit_market_price?.toLocaleString('en-IN')}` : ''}>
-                            ₹{trade.exit_price?.toLocaleString('en-IN')}
-                            {trade.exit_market_price ? ` (MKT ₹${trade.exit_market_price?.toLocaleString('en-IN')})` : ''}
+                        <span title={trade.exit_market_price ? `Exit market: ${fmt(trade.exit_market_price)}` : ''}>
+                            {fmt(trade.exit_price)}
+                            {trade.exit_market_price ? ` (MKT ${fmt(trade.exit_market_price)})` : ''}
                         </span>
                     ) : <span className="open-badge">OPEN</span>}
                 </td>
                 <td className={`mono fw-bold ${isOpen ? '' : isProfit ? 'text-profit' : 'text-loss'}`}>
-                    {isOpen ? '—' : `${isProfit ? '+' : ''}₹${trade.pnl?.toFixed(2)}`}
+                    {isOpen ? '—' : `${isProfit ? '+' : ''}${fmt(trade.pnl)}`}
                 </td>
                 <td className="conf-col">
                     <span className={`conf-badge ${(trade.confidence || 0) >= 75 ? 'high' : (trade.confidence || 0) >= 60 ? 'med' : 'low'}`}>
@@ -86,7 +89,7 @@ const HistoryRow = ({ trade }) => {
                                 </div>
                                 <div className="tdp-row">
                                     <span>Brokerage</span>
-                                    <span className="text-loss">-₹{(trade.brokerage || 0).toFixed(2)}</span>
+                                    <span className="text-loss">-{fmt(trade.brokerage || 0)}</span>
                                 </div>
                             </div>
                         </div>
@@ -98,6 +101,8 @@ const HistoryRow = ({ trade }) => {
 };
 
 const History = () => {
+    const { market } = useMarket();
+    const fmt = (amount, opts) => formatCurrency(amount, market, opts);
     const [trades, setTrades] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [filter, setFilter] = useState('ALL');
@@ -121,7 +126,7 @@ const History = () => {
 
     useEffect(() => {
         loadTrades();
-    }, []);
+    }, [market]);
 
     const closed = (trades || []).filter(t => t.pnl !== null && t.pnl !== undefined);
     const stats = {
@@ -174,7 +179,7 @@ const History = () => {
                     <div className="hsc-info">
                         <span className="hsc-label">Net Realized</span>
                         <span className={`hsc-value ${stats.totalPnl >= 0 ? 'text-profit' : 'text-loss'}`}>
-                            {stats.totalPnl >= 0 ? '+' : ''}₹{Math.abs(stats.totalPnl).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                            {stats.totalPnl >= 0 ? '+' : ''}{fmt(Math.abs(stats.totalPnl))}
                         </span>
                     </div>
                     <div className="hsc-sub">realized PnL</div>

@@ -11,8 +11,11 @@ router = APIRouter(prefix="/broker", tags=["Broker & Risk"])
 
 
 @router.get("/trades", response_model=None)
-def get_all_trades(db: Session = Depends(get_db)):
-    trades = db.query(Trade).options(joinedload(Trade.agent)).order_by(Trade.entry_time.desc()).all()
+def get_all_trades(market: str | None = None, db: Session = Depends(get_db)):
+    query = db.query(Trade).options(joinedload(Trade.agent)).order_by(Trade.entry_time.desc())
+    if market is not None:
+        query = query.filter(Trade.market == market.strip().upper())
+    trades = query.all()
     result = []
 
     def _is_bullish_position(position_type: str | None) -> bool:
@@ -56,13 +59,17 @@ def get_all_trades(db: Session = Depends(get_db)):
             "entry_time": t.entry_time.isoformat() if t.entry_time else None,
             "exit_time": t.exit_time.isoformat() if t.exit_time else None,
             "brokerage": t.brokerage,
+            "market": getattr(t, "market", "IN") or "IN",
         })
     return result
 
 
 @router.get("/positions", response_model=None)
-def get_all_positions(db: Session = Depends(get_db)):
-    positions = db.query(Position).options(joinedload(Position.agent)).all()
+def get_all_positions(market: str | None = None, db: Session = Depends(get_db)):
+    pos_query = db.query(Position).options(joinedload(Position.agent))
+    if market is not None:
+        pos_query = pos_query.filter(Position.market == market.strip().upper())
+    positions = pos_query.all()
     position_trade_ids = {p.trade_id for p in positions if p.trade_id is not None}
 
     # Defensive fallback: if an OPEN trade lost its Position row unexpectedly,
@@ -99,6 +106,7 @@ def get_all_positions(db: Session = Depends(get_db)):
             "target_price": pos.target_price,
             "unrealized_pnl": round(unrealized, 2),
             "opened_at": pos.opened_at.isoformat() if pos.opened_at else None,
+            "market": getattr(pos, "market", "IN") or "IN",
         })
 
     for trade in orphan_open_trades:
@@ -123,6 +131,7 @@ def get_all_positions(db: Session = Depends(get_db)):
             "target_price": trade.target_price,
             "unrealized_pnl": round(unrealized, 2),
             "opened_at": trade.entry_time.isoformat() if trade.entry_time else None,
+            "market": getattr(trade, "market", "IN") or "IN",
         })
 
     return result
@@ -141,7 +150,6 @@ def get_leaderboard(db: Session = Depends(get_db)):
             "claude": "var(--color-claude)",
             "grok": "var(--color-grok)",
             "qwen": "var(--accent-cyan)",
-            "deepseek": "var(--accent-purple)",
             "local": "var(--green-profit)",
             "ollama": "var(--green-profit)",
         }

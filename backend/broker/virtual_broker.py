@@ -84,6 +84,7 @@ class VirtualBroker:
             slippage=round(fill_price - market_price, 2),
             status="OPEN",
             confidence=confidence,
+            market=getattr(agent, "market", "IN") or "IN",
             entry_time=get_ist_now()
         )
         db_session.add(trade)
@@ -101,6 +102,7 @@ class VirtualBroker:
             current_price=entry_price,
             stop_loss=round(stop_loss, 2),
             target_price=round(target, 2),
+            market=getattr(agent, "market", "IN") or "IN",
             opened_at=get_ist_now()
         )
         db_session.add(position)
@@ -174,6 +176,7 @@ class VirtualBroker:
             slippage=round(market_price - fill_price, 2),
             status="OPEN",
             confidence=confidence,
+            market=getattr(agent, "market", "IN") or "IN",
             entry_time=get_ist_now()
         )
         db_session.add(trade)
@@ -191,6 +194,7 @@ class VirtualBroker:
             current_price=entry_price,
             stop_loss=round(stop_loss, 2),
             target_price=round(target, 2),
+            market=getattr(agent, "market", "IN") or "IN",
             opened_at=get_ist_now()
         )
         db_session.add(position)

@@ -11,7 +11,6 @@ class Settings:
     GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
     XAI_API_KEY: str = os.getenv("XAI_API_KEY", "")
-    DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY", "")
 
 
 
@@ -46,11 +45,33 @@ class Settings:
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
     GROQ_MODEL: str = "openai/gpt-oss-120b"  # llama-3.3-70b-versatile was retired from Groq's catalog
     OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3.2")
-    GITHUB_API_KEYS: list = [k.strip() for k in os.getenv("GITHUB_API_KEYS", "").split(",") if k.strip()] or [os.getenv("GITHUB_API_KEY", "")]
-    GITHUB_API_KEY: str = os.getenv("GITHUB_API_KEY", "")
-    GITHUB_MODEL: str = os.getenv("GITHUB_MODEL", "gpt-4o")
     HF_API_KEY: str = os.getenv("HF_API_KEY", "")
     HF_MODEL: str = os.getenv("HF_MODEL", "meta-llama/Llama-3.3-70B-Instruct")
+
+class AlpacaSettings:
+    """Alpaca Market Data / Trading API credentials and endpoints, all env-driven.
+    Never hardcode keys here — `is_configured()` gates every AlpacaMarketDataProvider call
+    so a missing key fails with a clear ALPACA_NOT_CONFIGURED error instead of crashing or
+    silently falling back to fake data."""
+
+    API_KEY: str = os.getenv("ALPACA_API_KEY", "")
+    SECRET_KEY: str = os.getenv("ALPACA_SECRET_KEY", "")
+    TRADING_BASE_URL: str = os.getenv("ALPACA_TRADING_BASE_URL", "https://paper-api.alpaca.markets/v2")
+    DATA_BASE_URL: str = os.getenv("ALPACA_DATA_BASE_URL", "https://data.alpaca.markets/v2")
+
+    @classmethod
+    def is_configured(cls) -> bool:
+        return bool(cls.API_KEY and cls.SECRET_KEY)
+
+    @classmethod
+    def auth_headers(cls) -> dict:
+        return {
+            "APCA-API-KEY-ID": cls.API_KEY,
+            "APCA-API-SECRET-KEY": cls.SECRET_KEY,
+        }
+
+
+alpaca_settings = AlpacaSettings()
 
 settings = Settings()
 

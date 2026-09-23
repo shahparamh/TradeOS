@@ -9,8 +9,6 @@ import asyncio
 import json
 from agents.gemini_agent import query_gemini
 from agents.groq_agent import query_groq
-from agents.github_agent import query_github
-from agents.deepseek_agent import query_deepseek
 from agents.ollama_agent import query_ollama
 from agents.prompts import (
     ARENA_TECHNICAL_ANALYST_PROMPT,
@@ -25,18 +23,17 @@ from agents.prompts import (
     build_arena_trader_payload,
     build_arena_portfolio_manager_payload,
 )
+from datetime import datetime
 from broker.survival_risk_manager import SurvivalRiskManager
-from database.models import ArenaDebateLog, ArenaReflection
+from database.models import ArenaDebateLog, ArenaReflection, Trade
 from utils.logger import setup_logger
-from utils.helpers import generate_cycle_id
+from utils.helpers import generate_cycle_id, get_ist_now
 
 logger = setup_logger("arena_debate")
 
 _PROVIDER_DISPATCH = {
     "google": query_gemini,
     "groq": query_groq,
-    "github": query_github,
-    "deepseek": query_deepseek,
     "ollama": query_ollama,
 }
 
@@ -70,6 +67,18 @@ async def _ask(provider: str, payload: str, system_prompt: str) -> dict:
         return {"error": str(e)}
 
 
+def _today_realized_pnl(db, agent_id: int) -> float:
+    """Shared with SurvivalRiskManager's daily kill-switch check, but reuses the caller's
+    session instead of opening a new one — safe to call twice per debate since it's a cheap
+    read, and keeps the PM's view of today's P&L consistent with what the risk engine sees."""
+    today_start = datetime.combine(get_ist_now().date(), datetime.min.time())
+    trades_today = db.query(Trade).filter(
+        Trade.agent_id == agent_id,
+        Trade.exit_time >= today_start,
+    ).all()
+    return sum(t.pnl for t in trades_today if t.pnl)
+
+
 def _recent_reflections(db, agent_id: int, limit: int = 5) -> list:
     rows = (
         db.query(ArenaReflection)
@@ -95,6 +104,7 @@ async def run_arena_debate(agent, opportunity: dict, agent_state: dict, db) -> d
     ArenaDebateLog row regardless of outcome.
     """
     symbol = opportunity["symbol"]
+    market = opportunity.get("market", "IN")
     provider = agent.provider
     cycle_id = generate_cycle_id()
 
@@ -102,7 +112,7 @@ async def run_arena_debate(agent, opportunity: dict, agent_state: dict, db) -> d
     fundamentals = opportunity.get("fundamentals", {})
     news = opportunity.get("news", [])
 
-    analyst_payload = build_arena_analyst_payload(symbol, indicators, fundamentals, news)
+    analyst_payload = build_arena_analyst_payload(symbol, indicators, fundamentals, news, market=market)
 
     # 1. Analyst Team — parallel
     technical_report, fundamentals_report, sentiment_report = await asyncio.gather(
@@ -131,6 +141,7 @@ async def run_arena_debate(agent, opportunity: dict, agent_state: dict, db) -> d
     log = ArenaDebateLog(
         agent_id=agent.id,
         symbol=symbol,
+        market=market,
         cycle_id=cycle_id,
         analyst_reports=json.dumps(analyst_reports, default=str),
         bull_argument=json.dumps(bull_argument, default=str),
@@ -166,11 +177,24 @@ async def run_arena_debate(agent, opportunity: dict, agent_state: dict, db) -> d
     risk_reviews = [conservative_review, aggressive_review]
     log.risk_team_debate = json.dumps(risk_reviews, default=str)
 
-    # 5. Portfolio Manager
-    pm_payload = build_arena_portfolio_manager_payload(symbol, trader_proposal, risk_reviews)
+    # 5. Portfolio Manager — receives real portfolio state so it can check portfolio fit
+    # instead of re-litigating the setup's technicals. Only fields we can actually populate
+    # today (no sector/correlation data exists in the schema) are included, so the prompt
+    # can't be asked to weigh concerns it was never given data for.
+    portfolio_state = {
+        "cash_balance": agent_state.get("cash_balance"),
+        "open_positions_count": agent_state.get("positions_count", 0),
+        "max_open_positions": SurvivalRiskManager.MAX_OPEN_POSITIONS,
+        "open_symbols": agent_state.get("open_symbols", []),
+        "exposure_value": agent_state.get("open_positions_value", 0.0),
+        "today_realized_pnl": _today_realized_pnl(db, agent.id),
+        "daily_loss_kill_switch_pct": SurvivalRiskManager.DAILY_LOSS_KILL_SWITCH_PCT,
+    }
+    pm_payload = build_arena_portfolio_manager_payload(symbol, trader_proposal, risk_reviews, portfolio_state)
     pm_decision = await _ask(provider, pm_payload, ARENA_PORTFOLIO_MANAGER_PROMPT)
     pm_decision["symbol"] = symbol
     pm_decision["agent_id"] = agent.id
+    pm_decision["market"] = market
     log.portfolio_manager_decision = json.dumps(pm_decision, default=str)
 
     if pm_decision.get("decision") != "BUY":
@@ -187,6 +211,18 @@ async def run_arena_debate(agent, opportunity: dict, agent_state: dict, db) -> d
         "approved": result["approved"],
         "rejection_reason": result["rejection_reason"],
         "quantity": result["decision"].get("quantity"),
+        # SurvivalRiskManager now computes this deterministically (against the final,
+        # post-6%-clamp stop) whenever it gets far enough to check R:R -- lets diagnostics
+        # distinguish a RISK_REWARD_REJECTED rejection from sizing/cash/stop/position-limit/
+        # kill-switch rejections by their reason string, and see the ratio either way.
+        "risk_reward_ratio": result["decision"].get("risk_reward_ratio"),
+        # Both sides of the 6% stop clamp, logged whether or not it actually fired, so we can
+        # later measure how often/how much it changes the Trader's intended invalidation level
+        # -- purely observational, the clamp's own behavior is unchanged.
+        "proposed_stop_loss": result["decision"].get("proposed_stop_loss"),
+        "final_stop_loss": result["decision"].get("final_stop_loss"),
+        "proposed_stop_distance_pct": result["decision"].get("proposed_stop_distance_pct"),
+        "final_stop_distance_pct": result["decision"].get("final_stop_distance_pct"),
     }, default=str)
     log.final_action = "BUY" if result["approved"] else "REJECTED"
     db.add(log)
@@ -211,19 +247,22 @@ def record_reflection(db, agent, trade):
 
     realized_return_pct = (trade.pnl / (trade.entry_price * trade.quantity)) * 100 if trade.entry_price and trade.quantity else 0.0
 
-    # Approximate benchmark: today's Nifty move at reflection time, not a precise entry->exit window match.
+    # Approximate benchmark: today's index move at reflection time, not a precise
+    # entry->exit window match. IN uses Nifty; US benchmarking isn't wired up yet.
     benchmark_return_pct = None
-    try:
-        from data.market_fetcher import fetch_live_price
-        nifty = fetch_live_price("^NSEI")
-        benchmark_return_pct = nifty.get("change_pct")
-    except Exception:
-        pass
+    if getattr(trade, "market", "IN") == "IN":
+        try:
+            from data.market_fetcher import fetch_live_price
+            nifty = fetch_live_price("^NSEI")
+            benchmark_return_pct = nifty.get("change_pct")
+        except Exception:
+            pass
 
     outcome = "won" if trade.pnl > 0 else "lost"
+    currency_symbol = "$" if getattr(trade, "market", "IN") == "US" else "₹"
     reflection_text = (
         f"Trade on {trade.symbol} ({trade.entry_time.date() if trade.entry_time else 'N/A'}) {outcome} "
-        f"₹{trade.pnl:.2f} ({realized_return_pct:+.2f}%), exit reason: {trade.status}. "
+        f"{currency_symbol}{trade.pnl:.2f} ({realized_return_pct:+.2f}%), exit reason: {trade.status}. "
         f"{'Consider requiring stronger confluence before re-entering similar setups.' if trade.pnl < 0 else 'This setup type worked — note the entry conditions.'}"
     )
 

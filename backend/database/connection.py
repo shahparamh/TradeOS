@@ -44,9 +44,20 @@ _NEW_COLUMNS = {
         ("is_dead", "BOOLEAN DEFAULT FALSE"),
         ("died_at", "TIMESTAMP"),
         ("trading_paused", "BOOLEAN DEFAULT FALSE"),
+        ("market", "VARCHAR(10) DEFAULT 'IN'"),
     ],
     "arena_debate_logs": [
         ("indicators_snapshot", "TEXT"),
+        ("market", "VARCHAR(10) DEFAULT 'IN'"),
+    ],
+    "trades": [
+        ("market", "VARCHAR(10) DEFAULT 'IN'"),
+    ],
+    "positions": [
+        ("market", "VARCHAR(10) DEFAULT 'IN'"),
+    ],
+    "market_snapshots": [
+        ("market", "VARCHAR(10) DEFAULT 'IN'"),
     ],
 }
 

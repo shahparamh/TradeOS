@@ -3,25 +3,43 @@ import { useNavigate } from 'react-router-dom';
 import { Zap, Search, LogOut } from 'lucide-react';
 import { marketAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
-import { NIFTY50_SYMBOLS, SEARCH_PAGES } from '../utils/symbols';
+import { useMarket, MARKETS } from '../context/MarketContext';
+import { NIFTY50_SYMBOLS, SEARCH_PAGES, US_SYMBOLS } from '../utils/symbols';
 
 const TopBar = () => {
     const navigate = useNavigate();
     const { user, logout } = useAuth();
+    const { market, setMarket, meta } = useMarket();
     const [indices, setIndices] = useState([]);
+    const [marketStatus, setMarketStatus] = useState(null);
     const [query, setQuery] = useState('');
     const [open, setOpen] = useState(false);
     const [activeIdx, setActiveIdx] = useState(0);
     const inputRef = useRef(null);
 
+    // Indices are India-only for now (US index quotes aren't wired into /market/indices yet)
+    // — don't show stale Nifty/Sensex numbers when the US market is selected.
     useEffect(() => {
+        if (market !== 'IN') {
+            setIndices([]);
+            return;
+        }
         const fetchIndices = () => {
             marketAPI.getIndices().then(res => setIndices(res.data || [])).catch(() => {});
         };
         fetchIndices();
         const interval = setInterval(fetchIndices, 30000);
         return () => clearInterval(interval);
-    }, []);
+    }, [market]);
+
+    useEffect(() => {
+        const fetchStatus = () => {
+            marketAPI.getStatus().then(res => setMarketStatus(res.data)).catch(() => setMarketStatus(null));
+        };
+        fetchStatus();
+        const interval = setInterval(fetchStatus, 30000);
+        return () => clearInterval(interval);
+    }, [market]);
 
     // Cmd/Ctrl+K opens and focuses global search; Escape closes it.
     useEffect(() => {
@@ -43,10 +61,11 @@ const TopBar = () => {
 
     const results = query.trim() === '' ? [] : (() => {
         const q = query.trim().toUpperCase();
-        const symbolMatches = NIFTY50_SYMBOLS
+        const symbolPool = market === 'US' ? US_SYMBOLS : NIFTY50_SYMBOLS;
+        const symbolMatches = symbolPool
             .filter(s => s.includes(q))
             .slice(0, 6)
-            .map(s => ({ type: 'symbol', label: s, meta: 'NSE Equity', value: s }));
+            .map(s => ({ type: 'symbol', label: s, meta: market === 'US' ? 'US Equity' : 'NSE Equity', value: s }));
         const pageMatches = SEARCH_PAGES
             .filter(p => p.label.toUpperCase().includes(q))
             .map(p => ({ type: 'page', label: p.label, meta: 'Page', value: p.path }));
@@ -81,19 +100,28 @@ const TopBar = () => {
         }
     };
 
-    const now = new Date();
-    const istHour = (now.getUTCHours() + 5 + Math.floor((now.getUTCMinutes() + 30) / 60)) % 24;
-    const istMinute = (now.getUTCMinutes() + 30) % 60;
-    const dayOfWeek = now.getUTCDay();
-    const marketOpen = dayOfWeek >= 1 && dayOfWeek <= 5 &&
-        (istHour > 9 || (istHour === 9 && istMinute >= 15)) &&
-        (istHour < 15 || (istHour === 15 && istMinute <= 30));
+    const marketOpen = !!marketStatus?.is_open;
 
     return (
         <header className="topbar">
             <div className="topbar-brand">
                 <Zap size={18} className="logo-icon" fill="currentColor" />
                 <h1 className="logo-text">Trade<span>OS</span></h1>
+            </div>
+
+            <div className="market-switch" role="group" aria-label="Select market">
+                {Object.values(MARKETS).map((m) => (
+                    <button
+                        key={m.code}
+                        type="button"
+                        className={`market-switch-btn ${market === m.code ? 'active' : ''}`}
+                        onClick={() => setMarket(m.code)}
+                        title={m.label}
+                    >
+                        <span className="market-switch-flag">{m.flag}</span>
+                        <span className="market-switch-code">{m.code}</span>
+                    </button>
+                ))}
             </div>
 
             <div className="topbar-search">
@@ -144,7 +172,7 @@ const TopBar = () => {
                             return (
                                 <div className="topbar-ticker-item" key={`${copy}-${idx.symbol}`} aria-hidden={copy === 1}>
                                     <span className="tt-name">{idx.symbol}</span>
-                                    <span className="tt-price">{idx.price?.toLocaleString('en-IN')}</span>
+                                    <span className="tt-price">{idx.price?.toLocaleString(market === 'US' ? 'en-US' : 'en-IN')}</span>
                                     <span className={`tt-change ${pct >= 0 ? 'up' : 'down'}`}>
                                         {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
                                     </span>
@@ -157,7 +185,7 @@ const TopBar = () => {
 
             <div className="topbar-session">
                 <span className={`status-dot ${marketOpen ? 'online' : 'closed'}`}></span>
-                NSE {marketOpen ? 'OPEN' : 'CLOSED'}
+                {meta.exchange} {marketOpen ? 'OPEN' : 'CLOSED'}
             </div>
 
             {user && (

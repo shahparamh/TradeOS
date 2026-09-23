@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Shield, Zap, BarChart3, Clock } from 'lucide-react';
 import { agentAPI } from '../services/api';
+import { formatCurrency } from '../utils/currency';
 
 const AgentDetail = () => {
     const { agentId } = useParams();
@@ -42,11 +43,12 @@ const AgentDetail = () => {
     if (!agent) return <div className="page-loading"><span>Agent not found.</span></div>;
 
     const stats = agent.stats || {};
+    const agentMarket = agent.market || 'IN';
+    const fmt = (amount, opts) => formatCurrency(amount, agentMarket, opts);
     const colorMap = {
         'gemini': 'var(--color-gemini)',
         'groq': 'var(--color-groq)',
         'chatgpt': 'var(--color-chatgpt)',
-        'github': 'var(--color-github)',
     };
     const colorKey = agent.name.toLowerCase().split('-')[0];
     const agentColor = colorMap[colorKey] || 'var(--accent-blue)';
@@ -97,12 +99,12 @@ const AgentDetail = () => {
                 <div className="aph-kpis">
                     <div className="kpi">
                         <span className="kpi-label">Balance</span>
-                        <span className="kpi-value mono">₹{agent.cash_balance.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+                        <span className="kpi-value mono">{fmt(agent.cash_balance, { maximumFractionDigits: 0, minimumFractionDigits: 0 })}</span>
                     </div>
                     <div className="kpi">
                         <span className="kpi-label">Net PnL</span>
                         <span className={`kpi-value mono ${agent.total_pnl >= 0 ? 'text-profit' : 'text-loss'}`}>
-                            {agent.total_pnl >= 0 ? '+' : ''}₹{agent.total_pnl.toFixed(2)}
+                            {agent.total_pnl >= 0 ? '+' : ''}{fmt(agent.total_pnl)}
                         </span>
                     </div>
                     <div className="kpi">
@@ -138,16 +140,16 @@ const AgentDetail = () => {
                             <div className="perf-item">
                                 <span className="pi-label">Avg PnL / Trade</span>
                                 <span className={`pi-value ${stats.avg_pnl >= 0 ? 'text-profit' : 'text-loss'}`}>
-                                    ₹{stats.avg_pnl?.toFixed(2) || '0.00'}
+                                    {stats.avg_pnl != null ? fmt(stats.avg_pnl) : fmt(0)}
                                 </span>
                             </div>
                             <div className="perf-item">
                                 <span className="pi-label">Best Trade</span>
-                                <span className="pi-value text-profit">+₹{stats.best_trade?.toFixed(2) || '0.00'}</span>
+                                <span className="pi-value text-profit">+{stats.best_trade != null ? fmt(stats.best_trade) : fmt(0)}</span>
                             </div>
                             <div className="perf-item">
                                 <span className="pi-label">Worst Trade</span>
-                                <span className="pi-value text-loss">₹{stats.worst_trade?.toFixed(2) || '0.00'}</span>
+                                <span className="pi-value text-loss">{stats.worst_trade != null ? fmt(stats.worst_trade) : fmt(0)}</span>
                             </div>
                         </div>
                     </div>
@@ -177,10 +179,10 @@ const AgentDetail = () => {
                                                     {t.position_type}
                                                 </span>
                                             </td>
-                                            <td className="mono">₹{t.entry_price}</td>
-                                            <td className="mono">{t.exit_price ? `₹${t.exit_price}` : '—'}</td>
+                                            <td className="mono">{formatCurrency(t.entry_price, t.market || agentMarket)}</td>
+                                            <td className="mono">{t.exit_price ? formatCurrency(t.exit_price, t.market || agentMarket) : '—'}</td>
                                             <td className={`mono fw-bold ${t.pnl > 0 ? 'text-profit' : t.pnl < 0 ? 'text-loss' : ''}`}>
-                                                {t.pnl != null ? `${t.pnl > 0 ? '+' : ''}₹${t.pnl.toFixed(2)}` : 'OPEN'}
+                                                {t.pnl != null ? `${t.pnl > 0 ? '+' : ''}${formatCurrency(t.pnl, t.market || agentMarket)}` : 'OPEN'}
                                             </td>
                                             <td>
                                                 <span className={`status-pill ${t.status?.toLowerCase().replace('_', '-')}`}>
@@ -214,7 +216,7 @@ const AgentDetail = () => {
                             <div className="risk-row">
                                 <span>Net PnL Today</span>
                                 <span className={agent.total_pnl >= 0 ? 'text-profit' : 'text-loss'}>
-                                    ₹{agent.total_pnl.toFixed(2)}
+                                    {fmt(agent.total_pnl)}
                                 </span>
                             </div>
                         </div>

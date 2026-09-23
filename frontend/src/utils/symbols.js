@@ -9,6 +9,11 @@ export const NIFTY50_SYMBOLS = [
   'ONGC', 'BPCL', 'GRASIM', 'NESTLEIND', 'TATASTEEL',
 ];
 
+// US watchlist symbols — mirrors backend/market_data/market_config.py US_WATCHLIST.
+export const US_SYMBOLS = [
+  'AAPL', 'MSFT', 'NVDA', 'AMZN', 'META', 'GOOGL', 'TSLA', 'AMD', 'JPM', 'AVGO',
+];
+
 // Static page destinations surfaced by the global search alongside instrument matches.
 export const SEARCH_PAGES = [
   { label: 'Dashboard', path: '/' },

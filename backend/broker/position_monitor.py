@@ -5,6 +5,8 @@ Actively watches open positions for stop-loss, target, and intraday square-off.
 
 from database.models import Position, Trade, Agent
 from data.market_fetcher import fetch_bulk_prices_cached
+from market_data.factory import get_provider
+from market_data.base import MarketDataError
 from utils.logger import setup_logger
 from utils.helpers import get_ist_now
 
@@ -22,10 +24,26 @@ class PositionMonitor:
         if not positions:
             return actions
 
-        # Batch-fetch current prices for every distinct symbol in ONE yfinance call,
-        # instead of one rate-limited round trip per open position.
-        unique_symbols = tuple(sorted({pos.symbol for pos in positions}))
-        prices = fetch_bulk_prices_cached(unique_symbols)
+        # Batch-fetch current prices per market — IN via the existing yfinance-backed
+        # cache, US via the Alpaca provider — instead of one round trip per open position.
+        by_market: dict[str, list] = {}
+        for pos in positions:
+            by_market.setdefault(getattr(pos, "market", "IN") or "IN", []).append(pos)
+
+        prices = {}
+        in_symbols = tuple(sorted({p.symbol for p in by_market.get("IN", [])}))
+        if in_symbols:
+            prices.update(fetch_bulk_prices_cached(in_symbols))
+
+        us_symbols = tuple(sorted({p.symbol for p in by_market.get("US", [])}))
+        if us_symbols:
+            try:
+                us_quotes = get_provider("US").get_bulk_quotes(us_symbols)
+                for sym, q in us_quotes.items():
+                    if q.get("price") is not None:
+                        prices[sym] = {"price": q["price"], "volume": q.get("volume", 0)}
+            except MarketDataError as e:
+                logger.warning(f"US position monitor price fetch skipped: {e.code} {e.message}")
 
         for pos in positions:
             try:
@@ -68,9 +86,12 @@ class PositionMonitor:
     def _evaluate_exit(self, position, current_price: float) -> str | None:
         """Determines if a position should be closed based on dynamic SL/Target rules."""
         now = get_ist_now()
-        
-        # 1. Intraday Square-off (3:15 PM IST)
-        if position.trade_type == "INTRADAY":
+        position_market = getattr(position, "market", "IN") or "IN"
+
+        # 1. Intraday Square-off (3:15 PM IST) — IN only. US intraday square-off would need
+        # its own America/New_York cutoff; not wired up yet, so US INTRADAY positions are
+        # only closed by SL/target below until that's added.
+        if position.trade_type == "INTRADAY" and position_market == "IN":
             # Only trigger intraday square-off if the position was opened before 3:15 PM
             # and current time is past 3:15 PM. This allows testing positions created during off-hours.
             if position.opened_at:
