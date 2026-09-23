@@ -11,7 +11,7 @@ import { brokerAPI, marketAPI } from '../services/api';
 import Watchlist from '../components/Watchlist';
 import ChartPanel from '../components/ChartPanel';
 import AgentDetailDrawer from '../components/AgentDetailDrawer';
-import { NIFTY50_SYMBOLS } from '../utils/symbols';
+import { NIFTY50_SYMBOLS, US_SYMBOLS } from '../utils/symbols';
 import { useMarket } from '../context/MarketContext';
 import { formatCurrency } from '../utils/currency';
 
@@ -30,7 +30,8 @@ const MetricCard = ({ label, value, detail, detailPositive, icon }) => (
     </div>
 );
 
-const HEATMAP_SYMBOLS = NIFTY50_SYMBOLS.slice(0, 12).map(s => `${s}.NS`);
+const IN_HEATMAP_SYMBOLS = NIFTY50_SYMBOLS.slice(0, 12).map(s => `${s}.NS`);
+const US_HEATMAP_SYMBOLS = US_SYMBOLS.slice(0, 12);
 
 const getHeatColor = (pct) => {
     if (pct == null) return { bg: 'var(--bg-tertiary)', border: 'var(--border-color)' };
@@ -50,9 +51,18 @@ const Dashboard = () => {
     const [leaderboard, setLeaderboard] = useState([]);
     const [heatmapQuotes, setHeatmapQuotes] = useState({});
     const [loading, setLoading] = useState(true);
-    const [selectedSymbol, setSelectedSymbol] = useState('RELIANCE.NS');
+    const heatmapSymbols = market === 'US' ? US_HEATMAP_SYMBOLS : IN_HEATMAP_SYMBOLS;
+    const defaultSymbol = market === 'US' ? 'AAPL' : 'RELIANCE.NS';
+    const [selectedSymbol, setSelectedSymbol] = useState(defaultSymbol);
     const [selectedQuote, setSelectedQuote] = useState(null);
     const [drawerAgentId, setDrawerAgentId] = useState(null);
+
+    // Reset the selected chart instrument to this market's default watchlist symbol when
+    // switching markets — otherwise a US switch would keep charting a stale NSE symbol.
+    useEffect(() => {
+        setSelectedSymbol(defaultSymbol);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [market]);
 
     const fetchData = useCallback(async () => {
         try {
@@ -60,7 +70,7 @@ const Dashboard = () => {
                 brokerAPI.getPositions(),
                 brokerAPI.getTrades(),
                 brokerAPI.getLeaderboard(),
-                marketAPI.getPrices(HEATMAP_SYMBOLS),
+                marketAPI.getPrices(heatmapSymbols),
             ]);
 
             if (posRes.status === 'fulfilled') setPositions(posRes.value.data);
@@ -72,7 +82,7 @@ const Dashboard = () => {
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [heatmapSymbols]);
 
     useEffect(() => {
         fetchData();
@@ -209,12 +219,12 @@ const Dashboard = () => {
                         <a href="/market" className="panel-action">Expand</a>
                     </div>
                     <div className="mini-heatmap-grid">
-                        {HEATMAP_SYMBOLS.map(sym => {
+                        {heatmapSymbols.map(sym => {
                             const q = heatmapQuotes[sym];
                             const pct = q?.percent_change ?? null;
                             const colors = getHeatColor(pct);
                             return (
-                                <div key={sym} className="mini-heatmap-tile" style={{ background: colors.bg, borderColor: colors.border }} title={q ? `${fmt(q.price)} (${pct.toFixed(2)}%)` : 'No data'}>
+                                <div key={sym} className="mini-heatmap-tile" style={{ background: colors.bg, borderColor: colors.border }} title={q ? `${fmt(q.price)}${pct != null ? ` (${pct.toFixed(2)}%)` : ''}` : 'No data'}>
                                     <span className="mht-symbol mono">{sym.replace('.NS', '')}</span>
                                     <span className="mht-pct mono">{pct == null ? '—' : `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`}</span>
                                 </div>
