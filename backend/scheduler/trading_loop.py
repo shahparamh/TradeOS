@@ -543,10 +543,20 @@ class TradingScheduler:
                         if len(positions) >= SurvivalRiskManager.MAX_OPEN_POSITIONS:
                             continue
 
+                        # "open_positions_value" feeds SurvivalRiskManager's death-threshold
+                        # and max-drawdown checks (equity = cash_balance + this). It must be
+                        # the positions' actual market value (entry_price*qty + P&L), not
+                        # just the P&L delta — using P&L alone made equity crater by the full
+                        # purchase amount the instant a position opened, at zero real loss,
+                        # able to falsely trip DEATH_THRESHOLD/MAX_DRAWDOWN on a healthy agent.
+                        open_positions_value = sum(
+                            (p.entry_price or 0.0) * (p.quantity or 0) + (p.unrealized_pnl or 0.0)
+                            for p in positions
+                        )
                         agent_state = {
                             "cash_balance": agent_row.cash_balance,
                             "starting_capital": agent_row.starting_capital,
-                            "open_positions_value": sum(p.unrealized_pnl or 0.0 for p in positions),
+                            "open_positions_value": open_positions_value,
                             "positions_count": len(positions),
                             "open_symbols": [p.symbol for p in positions],
                             "is_dead": agent_row.is_dead,

@@ -18,9 +18,21 @@ from market_data.factory import get_provider
 router = APIRouter(prefix="/arena", tags=["Survival Arena"])
 
 
+def _position_market_value(p: Position) -> float:
+    """Current market value of a position: what it was bought for plus/minus its P&L
+    since — i.e. what it would sell for right now, not just the P&L delta. Arena positions
+    are long-only equity (no options/leverage/shorting), so this is exact for them."""
+    return (p.entry_price or 0.0) * (p.quantity or 0) + (p.unrealized_pnl or 0.0)
+
+
 def _agent_equity(agent: Agent, db: Session) -> float:
+    """Cash + the market value of everything currently held. Previously this added only
+    unrealized_pnl (the P&L delta) instead of the position's actual value — since buying a
+    position spends cash but that bug never credited back what was bought with it, equity
+    (and the death-threshold/drawdown checks that depend on the same figure) would crater
+    by the full purchase amount the instant an agent opened any position, even at zero P&L."""
     positions = db.query(Position).filter(Position.agent_id == agent.id).all()
-    return agent.cash_balance + sum(p.unrealized_pnl or 0.0 for p in positions)
+    return agent.cash_balance + sum(_position_market_value(p) for p in positions)
 
 
 @router.get("/agents")
