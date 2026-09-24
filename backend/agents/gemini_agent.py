@@ -3,6 +3,7 @@ TradeOS — Gemini AI Agent (Google)
 Uses the google-generativeai SDK to query Gemini 1.5 Pro.
 """
 
+import asyncio
 import time
 import google.generativeai as genai
 from config import settings
@@ -66,7 +67,14 @@ async def query_gemini(payload: str, system_prompt: str = SYSTEM_PROMPT) -> dict
         # it never alters what counts as BUY/HOLD, only gives malformed output one more
         # chance to come back well-formed before we tag it as a parse error.
         for attempt in range(2):
-            response = model.generate_content(payload, generation_config=generation_config)
+            # google-generativeai's SDK is synchronous (blocking network I/O) — running it
+            # directly inside this async function freezes the ENTIRE event loop (every other
+            # request on the server, not just this call) for the full round trip. With Gemini
+            # as the default provider for every analyst/bull/bear/trader/risk/PM role in a
+            # debate, that's 7+ blocking calls back-to-back per symbol. to_thread moves it
+            # off the loop, matching the pattern groq_agent.py/ollama_agent.py already use
+            # with httpx.AsyncClient.
+            response = await asyncio.to_thread(model.generate_content, payload, generation_config=generation_config)
             raw_text = response.text
             parsed = parse_ai_response(raw_text)
             if parsed.get("error_type") != "parse_error":
