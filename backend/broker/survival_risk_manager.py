@@ -21,7 +21,12 @@ class SurvivalRiskManager:
                                         # authoritative R:R gate; Trader may weigh R:R
                                         # qualitatively but does not enforce it, and PM is
                                         # explicitly barred from re-litigating it
-    MAX_OPEN_POSITIONS = 2
+    MAX_OPEN_POSITIONS = 6                 # raised from 2 so larger accounts (e.g. a $200K
+                                            # game) can actually diversify across the watchlist
+                                            # instead of parking most of their capital idle
+                                            # after just two positions
+    MAX_CAPITAL_PER_POSITION_PCT = 0.20     # no single position's notional may exceed this
+                                            # share of equity, independent of risk-based sizing
     DAILY_LOSS_KILL_SWITCH_PCT = -0.05  # -5% of starting capital in one day halts new entries
     MAX_TOTAL_DRAWDOWN_PCT = -0.30      # -30% of starting capital is the outer drawdown guard
     ENABLE_SHORT_SELLING = False
@@ -119,6 +124,18 @@ class SurvivalRiskManager:
                 "rejection_reason": f"Computed position size is below 1 share (risk budget ₹{risk_amount:.2f} / stop distance ₹{stop_distance:.2f}).",
                 "decision": decision,
             }
+
+        # Pure risk-based sizing (risk_amount / stop_distance) has no ceiling on notional —
+        # a tight stop relative to price (common on lower-volatility large caps) can size a
+        # "1%-risk" trade into most of the account's cash in one symbol, defeating
+        # MAX_OPEN_POSITIONS entirely since there's nothing left to diversify with. Cap any
+        # single position's notional so a larger account can actually spread across multiple
+        # names instead of parking most of its capital in the first idea that clears R:R.
+        max_position_notional = equity * self.MAX_CAPITAL_PER_POSITION_PCT
+        max_qty_by_concentration = math.floor(max_position_notional / entry)
+        qty = min(qty, max_qty_by_concentration)
+        if qty < 1:
+            return {"approved": False, "rejection_reason": "Computed position size is below 1 share after the per-position concentration cap.", "decision": decision}
 
         # Never spend more cash than available on hand
         max_affordable = math.floor(agent_state["cash_balance"] / entry)
