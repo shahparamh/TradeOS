@@ -111,7 +111,13 @@ class SurvivalRiskManager:
 
         # Deterministic position sizing: risk_amount / stop_distance — the AI's proposed
         # quantity is discarded entirely in favor of this formula (spec section 13).
-        equity = agent_state["cash_balance"]
+        # MAX_RISK_PER_TRADE_PCT is documented (and must behave) as 1% of current EQUITY —
+        # cash_balance alone shrinks every time capital moves into a position even though
+        # true equity hasn't, which silently shrank the risk budget (and so the computed
+        # quantity) for every trade after the first in a cycle, degenerating toward 1 share
+        # regardless of how well-capitalized the account actually was. Matches the equity
+        # definition already used by the death-threshold/drawdown checks below.
+        equity = agent_state["cash_balance"] + agent_state.get("open_positions_value", 0.0)
         risk_amount = equity * self.MAX_RISK_PER_TRADE_PCT
         stop_distance = abs(entry - decision["stop_loss"])
         if stop_distance <= 0:
